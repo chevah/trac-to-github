@@ -44,6 +44,7 @@ def main():
             print("Adding", name)
 
             create_dirs(name)
+            text = convert_content(text)
             write_file(name, text)
             commit_change(name, author, comment)
 
@@ -83,17 +84,24 @@ def create_dirs(name):
         os.mkdir(parent)
 
 
+def convert_content(text):
+    """
+    Conver from Trac wiki RST format to standard RST format.
+    """
+    # Remove RST wrapping.
+    result = text.strip('}}}')
+    result = result.strip('{{{')
+    result = result.strip()
+    result = result.strip('#!rst')
+    result += '\n'
+
+    return result
+
+
 def write_file(name, text):
     """
     Write file content.
     """
-    # Remove RST wrapping.
-    text = text.strip('}}}')
-    text = text.strip('{{{')
-    text = text.strip()
-    text = text.strip('#!rst')
-    text += '\n'
-
     with open(name, 'w') as stream:
         stream.write(text)
 
