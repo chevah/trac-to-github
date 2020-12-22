@@ -17,3 +17,10 @@ Create a virtualenv::
 For wiki migration::
 
     python wiki-migrate.py PATH/TO/Trac.DB PATH/TO/GIT-REPO
+
+You might want to add a `_Sidebar.rst` file in the root wit::
+
+    * `<Administrative>`_
+    * `<Development>`_
+    * `<Infrastructure>`_
+    * `<Support>`_
