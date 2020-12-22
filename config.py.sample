@@ -1,0 +1,4 @@
+# Trac User to GitHub user mapping
+USER_MAPPING = {
+    'adi': ('adiroiban', 'Adi Roiban <adi.roiban@chevah.com>'),
+    }
