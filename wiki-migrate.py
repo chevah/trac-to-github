@@ -3,6 +3,7 @@ import os
 import sqlite3
 import subprocess
 import sys
+from datetime import datetime
 
 from config import USER_MAPPING
 
@@ -35,7 +36,7 @@ def main():
         os.chdir(sys.argv[2])
 
         for row in db.execute('SELECT * FROM wiki ORDER BY time'):
-            name, version, time, author, ipnr, text, comment, ro = row
+            name, version, timestamp, author, ipnr, text, comment, ro = row
             if author == 'trac':
                 continue
 
@@ -46,7 +47,7 @@ def main():
             create_dirs(name)
             text = convert_content(text)
             write_file(name, text)
-            commit_change(name, author, comment)
+            commit_change(name, author, comment, timestamp / 1000000)
 
 
     finally:
@@ -70,6 +71,7 @@ def get_page_name(name):
         dir_name = os.path.join(*parts)
 
     return os.path.join(dir_name, file_name)
+
 
 def create_dirs(name):
     """
@@ -106,7 +108,7 @@ def write_file(name, text):
         stream.write(text)
 
 
-def commit_change(path, author, comment):
+def commit_change(path, author, comment, timestamp):
     """
     Commit the current file.
     """
@@ -122,15 +124,18 @@ def commit_change(path, author, comment):
     else:
         message = name + ' modified by ' + git_user
 
+    git_date = datetime.fromtimestamp(timestamp).isoformat()
+
     if DRY_RUN:
-        print('Dry commit:', message, 'Git author:', git_author)
+        print(git_date + ': Dry commit:', message, 'Git author:', git_author)
         return
 
     subprocess.run(['git', 'add', path])
     subprocess.run([
         'git', 'commit', '-a',
         '-m', message,
-        '--author=' + git_author
+        '--author=' + git_author,
+        '--date=' + git_date,
         ])
 
 if __name__ == '__main__':
