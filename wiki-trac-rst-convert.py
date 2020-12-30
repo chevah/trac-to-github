@@ -99,7 +99,7 @@ def convert_file(path):
     """
     """
     print('Converting ', path)
-    if 'Administrative.rst' in path:    
+    if 'Development.rst' in path:    
         file = open(path, "r")
         text = file.readlines()
         convert_content(text, path)
@@ -110,7 +110,7 @@ def convert_content(text, path):
     """
     Convert from Trac wiki RST format to standard RST format.
     """
-    #import pdb; import sys; sys.stdout = sys.__stdout__; pdb.set_trace()
+    import pdb; import sys; sys.stdout = sys.__stdout__; pdb.set_trace()
 
     #`Requirements <https://github.com/chevah/server/wiki/Requirements>`_
 
@@ -131,8 +131,18 @@ def convert_content(text, path):
         result = result.strip()
 
         if '[wiki:' in result:
-            result = result.replace('[wiki:', ' ` ' + wiki_url)
+            result = result.replace('[wiki:', ' `<' + wiki_url)
+        elif '[http:' in result:
+            result = result.replace('[', '')
             result = result.replace(']', '')
+
+            qwerty = result.split(' ')
+            url = qwerty[0]
+            plain_text = ''
+            for data in qwerty[1:]:
+                plain_text = plain_text + data + ' '
+            qwerty = ' <' + url + '>'
+            result =  '* `' + plain_text + qwerty + '`_\n'
         #only for main pagess
         else:
             if result is not '':
