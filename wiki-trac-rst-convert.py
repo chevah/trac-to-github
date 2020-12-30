@@ -130,21 +130,16 @@ def convert_content(text, path):
         result = result.replace('*', '')
         result = result.strip()
 
-        if '[wiki:' in result:
-            result = result.replace('[wiki:', ' `<' + wiki_url)
-        elif '[http:' in result:
+
+        if '[http:' in result:
             result = result.replace('[', '')
             result = result.replace(']', '')
+            result = handle_http_urls(result)
 
-            qwerty = result.split(' ')
-            url = qwerty[0]
-            plain_text = ''
-            for data in qwerty[1:]:
-                plain_text = plain_text + data + ' '
-            qwerty = ' <' + url + '>'
-            result =  '* `' + plain_text + qwerty + '`_\n'
         #only for main pagess
         else:
+            result = result.replace('[', '')
+            result = result.replace(']', '')
             if result is not '':
                 result = result.replace('wiki:', '<' +wiki_url)
                 abcd = result.split(' ')
@@ -215,6 +210,16 @@ def format_name(text):
     print(q[-1])
     return q[-1]
 
+def handle_http_urls(text):
+    qwerty = text.split(' ')
+    url = qwerty[0]
+    plain_text = ''
+    for data in qwerty[1:]:
+        plain_text = plain_text + data + ' '
+    qwerty = ' <' + url + '>'
+    formatted_text =  '* `' + plain_text + qwerty + '`_\n'
+
+    return formatted_text
 
 if __name__ == '__main__':
     main()
