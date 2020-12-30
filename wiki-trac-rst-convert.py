@@ -138,24 +138,15 @@ def convert_content(text, path):
             if result is not '':
                 result = result.replace('wiki:', '<' + wiki_url)
                 abcd = result.split(' ')
-                if wiki_url in abcd[0]:
+
+                if wiki_url in abcd[0] and len(abcd) > 1:
                     aaaaa = ''
-                    for string in abcd[:1]:
-                        aaaaa = aaaaa + string
-                    import pdb; import sys; sys.stdout = sys.__stdout__; pdb.set_trace()
+                    for string in abcd[1:]:
+                        aaaaa = aaaaa + string + ' '
 
-                    result = abcd[0] + '>' + aaaaa
+                    result = abcd[0] + '> ' + aaaaa
 
 
-        if wiki_url in result:
-
-            a = result.split(wiki_url)
-            format_link = a[1].replace(')', '')
-            result = '* `' + format_link  + ' ' + result + '>`'
-            #if result[-1] == ".":
-            #    result = result + '`'
-
-            
         
         result += '\n'
         if title_index in result:
