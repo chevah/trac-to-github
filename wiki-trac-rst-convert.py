@@ -136,18 +136,27 @@ def convert_content(text, path):
         #only for main pagess
         else:
             if result is not '':
-                result = result.replace('wiki:', '<' + wiki_url)
+                result = result.replace('wiki:', '<' +wiki_url)
                 abcd = result.split(' ')
 
                 if wiki_url in abcd[0] and len(abcd) > 1:
                     aaaaa = ''
                     for string in abcd[1:]:
                         aaaaa = aaaaa + string + ' '
+                    result = abcd[0] + '>`_ ' + aaaaa
 
-                    result = abcd[0] + '> ' + aaaaa
+                elif wiki_url in abcd[0]:
+                    result = result + '>`_'
 
+        if wiki_url in result:
+            a = result.split('>')
+            formated_name = ''
+            formated_name = format_name(a[0])
 
-        
+            result = '* `' + formated_name + ' ' + result
+            #if result[-1] == ".":
+            #    result = result + '`'
+
         result += '\n'
         if title_index in result:
             result = write_sub_links(result, path)
@@ -165,7 +174,7 @@ def convert_content(text, path):
 
 
 def write_sub_links(text, path):
-    import pdb; import sys; sys.stdout = sys.__stdout__; pdb.set_trace()
+   # import pdb; import sys; sys.stdout = sys.__stdout__; pdb.set_trace()
 
     result = text.replace('[[TitleIndex(', '')
     result = result.replace('/)]]', '')
@@ -187,6 +196,17 @@ def write_sub_links(text, path):
 
 
     return sub_links
+
+
+
+def format_name(text):
+    """
+       Format Wiki name 
+    """
+
+    q = text.split('/')
+    print(q[-1])
+    return q[-1]
 
 
 if __name__ == '__main__':
