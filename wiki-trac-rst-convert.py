@@ -164,7 +164,7 @@ def convert_content(text, path):
         string1 = string1 + result
 
     
-    f = open("myfile.txt", "w") 
+    f = open("myfile.rst", "w") 
 
     f.write(string1)
     f.close()
@@ -179,9 +179,7 @@ def write_sub_links(text, path):
     result = text.replace('[[TitleIndex(', '')
     result = result.replace('/)]]', '')
     result = result.strip()
-
     path = '../server.wiki/' + result
-
 
     link = ''
     sub_links = ''
@@ -192,11 +190,10 @@ def write_sub_links(text, path):
             link = link.replace(' ', '-')
             name = link.replace(link+'-', '')
 
-            sub_links = sub_links + '* ' + '['+ name +'](' + wiki_url + link + ')\n'
+            sub_links = sub_links + '* ' + '`'+ name + ' <' + wiki_url + link + '>`_\n'
 
 
     return sub_links
-
 
 
 def format_name(text):
