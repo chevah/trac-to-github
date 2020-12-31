@@ -1,10 +1,10 @@
 # Convert local files formated in Trac Wiki RST to Vanilla RST.
 import sys
 import os
-
+from wikiFormatRstLinks import convert_links
 
 wiki_url = 'https://github.com/chevah/server/wiki/'
-
+git_url = 'https://github.com/chevah/server/wiki/'
 
 def main():
     """
@@ -22,24 +22,26 @@ def convert_file(path):
     """
     """
     print('Converting ', path)
-    if 'Development.rst' in path:    
-        file = open(path, "r")
+    file = open(path, "r")
+    try:
         text = file.readlines()
-        convert_content(text, path)
+    except UnicodeDecodeError:
+        return 
+
+    if is_rst_file(text):
+        converted_text = convert_links(text)
+    else:
+        converted_text = convert_content(text, path)
+    
+    write_file(path, converted_text)
 
 def convert_content(text, path):
     """
     Convert from Trac wiki RST format to standard RST format.
     """
-    import pdb; import sys; sys.stdout = sys.__stdout__; pdb.set_trace()
-
-    #`Requirements <https://github.com/chevah/server/wiki/Requirements>`_
-
-    title_index = '[[TitleIndex'
-
-    string1 = ''
+    title_index = 'TitleIndex'
+    formatted_rst_text = ''
     for line in text:
-
         # Remove RST wrapping.
         result = line.strip('}}}')
         result = result.strip('{{{')
@@ -48,63 +50,56 @@ def convert_content(text, path):
 
         result = result.replace(':trac:', '')
         result = result.replace('`', '')
+        result = result.replace('"', '')
         result = result.replace('*', '')
         result = result.strip()
-
 
         if '[http:' in result:
             result = result.replace('[', '')
             result = result.replace(']', '')
             result = handle_http_urls(result)
-
-        #only for main pagess
         else:
             result = result.replace('[', '')
             result = result.replace(']', '')
             if result is not '':
                 result = result.replace('wiki:', '<' +wiki_url)
-                abcd = result.split(' ')
+                words = result.split(' ')
 
-                if wiki_url in abcd[0] and len(abcd) > 1:
-                    aaaaa = ''
-                    for string in abcd[1:]:
-                        aaaaa = aaaaa + string + ' '
-                    result = abcd[0] + '>`_ ' + aaaaa
-
-                elif wiki_url in abcd[0]:
+                if wiki_url in words[0] and len(words) > 1:
+                    re_do_text = ''
+                    for word in words[1:]:
+                        re_do_text = re_do_text + word + ' '
+                    result = words[0] + '>`_ ' + re_do_text
+                elif wiki_url in words[0]:
                     result = result + '>`_'
+                elif git_url in result: 
+                    result  = handle_git_urls(words)
 
         if wiki_url in result:
             a = result.split('>')
             formated_name = ''
             formated_name = format_name(a[0])
+            result = '* `' + formated_name + ' ' + result + '\n\n'
+        
+        if not result == '':
+            if result[-1] == '=':
+                result += '\n\n\n'
+            else:
+                result += '\n\n'
 
-            result = '* `' + formated_name + ' ' + result
-            #if result[-1] == ".":
-            #    result = result + '`'
-
-        result += '\n'
         if title_index in result:
             result = write_sub_links(result, path)
 
-        string1 = string1 + result
+        formatted_rst_text = formatted_rst_text + result
 
-    
-    f = open("myfile.rst", "w") 
-
-    f.write(string1)
-    f.close()
-
-
-    #return result
+    return formatted_rst_text
 
 def write_sub_links(text, path):
-   # import pdb; import sys; sys.stdout = sys.__stdout__; pdb.set_trace()
+    find_brackets_index = text.find('(')
+    find_slash_index = text.find('/')
 
-    result = text.replace('[[TitleIndex(', '')
-    result = result.replace('/)]]', '')
-    result = result.strip()
-    path = '../server.wiki/' + result
+    sub_links_title = text[find_brackets_index +1:find_slash_index] 
+    path = '../server.wiki/' + sub_links_title
 
     link = ''
     sub_links = ''
@@ -114,9 +109,7 @@ def write_sub_links(text, path):
             link = file.replace('.rst', '')
             link = link.replace(' ', '-')
             name = link.replace(link+'-', '')
-
             sub_links = sub_links + '* ' + '`'+ name + ' <' + wiki_url + link + '>`_\n'
-
 
     return sub_links
 
@@ -125,20 +118,47 @@ def format_name(text):
        Format Wiki name 
     """
 
-    q = text.split('/')
-    print(q[-1])
-    return q[-1]
+    name = text.split('/')
+    return name[-1]
 
 def handle_http_urls(text):
-    qwerty = text.split(' ')
-    url = qwerty[0]
+    """
+        Format http urls for standart rst
+    """
+    words = text.split(' ')
+    url = words[0]
     plain_text = ''
-    for data in qwerty[1:]:
+    for data in words[1:]:
         plain_text = plain_text + data + ' '
-    qwerty = ' <' + url + '>'
-    formatted_text =  '* `' + plain_text + qwerty + '`_\n'
+    words = ' <' + url + '>'
+    formatted_text =  '* `' + plain_text + words + '`_\n'
 
     return formatted_text
+
+def handle_git_urls(text_arr):
+    formatted_text = ''
+    for string in text_arr:
+        if git_url in string:
+            string += '>`_'
+            formatted_text = formatted_text + string
+        else:
+            formatted_text = formatted_text + string +  ' '
+
+    return formatted_text
+
+def is_rst_file(lines):
+    for line in lines:
+        rst = line.find('#!rst')
+        if rst != -1:
+            return True
+    return False
+
+def write_file(name, text):
+    """
+    Write file content.
+    """
+    with open(name, 'w') as stream:
+        stream.write(text)
 
 if __name__ == '__main__':
     main()
