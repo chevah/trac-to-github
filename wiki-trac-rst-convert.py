@@ -157,6 +157,8 @@ def write_file(name, text):
     """
     Write file content.
     """
+    if 'git' in name:
+        return 
     with open(name, 'w') as stream:
         stream.write(text)
 
