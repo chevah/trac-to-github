@@ -16,7 +16,7 @@ Create a virtualenv::
 
 For wiki migration::
 
-    python wiki-migrate.py PATH/TO/Trac.DB PATH/TO/GIT-REPO
+    python wiki_migrate.py PATH/TO/Trac.DB PATH/TO/GIT-REPO
 
 You might want to add a `_Sidebar.rst` file in the root wit::
 
@@ -27,4 +27,4 @@ You might want to add a `_Sidebar.rst` file in the root wit::
 
 For wiki content convertion::
 
-    python wiki-trac-rst-convert.py PATH/TO/GIT-REPO
+    python wiki_trac_rst_convert.py PATH/TO/GIT-REPO
