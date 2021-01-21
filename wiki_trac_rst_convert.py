@@ -3,6 +3,8 @@ import re
 import sys
 import os
 
+from urllib.parse import quote
+
 from wiki_migrate import get_page_name
 
 
@@ -21,7 +23,7 @@ def main():
     print('Conversion complete.')
 
 
-def convert_file(path):
+def convert_file(path: str):
     """
     In-place conversion of files; no backup.
     """
@@ -33,41 +35,41 @@ def convert_file(path):
         f.write(convert_content(text))
 
 
-def convert_content(text):
+def convert_content(text: str):
     """
-    Conver from Trac wiki RST format to standard RST format.
+    Convert from Trac wiki RST format to standard RST format.
     """
     # Remove RST wrapping.
     result = text.strip('}}}')
     result = result.strip('{{{')
-    result = result.strip()
     result = result.replace('#!rst', '')
-    result += '\n'
-    result = _trac_wiki_to_plain_links(result)
+    result = result.strip()
+    result = _trac_rst_wiki_to_plain_links(result)
 
     return result
 
 
-def _trac_wiki_to_plain_links(text: str):
+def _trac_rst_wiki_to_plain_links(text: str):
     """
-    Converts Trac wiki links to plain relative links
-    :param result:
-    :return:
+    Takes RST content with Trac wiki link directives
+    and coverts the directives to single-line RST vanilla links.
     """
+
     link_re = re.compile(':trac:`wiki:(.+)`')
     wiki_titles = re.findall(link_re, text)
-    text = re.sub(link_re, r'`\1`_', text)
+    for title in wiki_titles:
+        text = re.sub(
+            link_re,
+            rf'`\1 <{_wiki_url(title)}>`__',
+            text
+        )
+        print(text)
 
-    return text + _wiki_footnotes(wiki_titles)
+    return text
 
 
-def _wiki_footnotes(wiki_titles):
-    lines = [
-        f'.. _{title}: {get_page_name(title)}\n'
-        for title in wiki_titles
-    ]
-
-    return ''.join(lines)
+def _wiki_url(title):
+    return quote(get_page_name(title))
 
 
 if __name__ == '__main__':

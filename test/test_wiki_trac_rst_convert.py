@@ -9,55 +9,72 @@ class TracRstToVanillaRst(unittest.TestCase):
     vanilla reStructuredText, that is supported by GitHub
     """
 
-    def test_empty_adds_newline(self):
-        """Adds a newline at the end of an empty file"""
-        self.assertEqual(convert_content(''), '\n')
+    def assertConvertedContent(self, expected: str, source: str):
+        """
+        Run the Trac RST `source` through the converter,
+        and assert that the output equals `expected`.
+        """
+        self.assertEqual(convert_content(source), expected)
 
-    def test_removes_RST_wrapping(self):
-        """Removes the Trac RST markers"""
-        self.assertEquals(
-            convert_content('{{{#!rst}}}'),
-            '\n'
-        )
-        self.assertEquals(
-            convert_content('{{{\n#!rst\n}}}'),
-            '\n'
-        )
+    def test_empty(self):
+        """Ensures that an empty string is returned unchanged."""
+        self.assertConvertedContent('', '')
 
-    def test_does_not_strip_content(self):
-        """When using str.strip, it deletes too much. Prevent this."""
-        self.assertEquals(
-            convert_content('{{{\n#!rst\nsome content}}}'),
-            '\nsome content\n'
-        )
+    def test_removes_rst_wrapping(self):
+        """
+        Removes the Trac RST markers, as well as the newlines around the
+        RST content.
 
-    def test_trac_wiki_link(self):
-        """Converts a Trac wiki link to a plain link"""
+        The Trac wiki syntax requires reStructuredText to be wrapped in
+        {{{ #!rst ... }}} blocks. Here, we make sure they don't appear
+        in the output.
+        """
+        self.assertConvertedContent('', '{{{\n#!rst\n}}}')
 
-        self.assertEquals(
-            convert_content(':trac:`wiki:Requirements`\n'),
-            '`Requirements`_\n'
-            '.. _Requirements: Requirements.rst\n'
-        )
-
-    def test_trac_wiki_link_to_page_in_subdir(self):
-        """Converts a Trac wiki link to a page in a subdirectory"""
-
-        self.assertEquals(
-            convert_content(':trac:`wiki:General/FreeSoftwareUsage`'),
-            '`General/FreeSoftwareUsage`_\n'
-            '.. _General/FreeSoftwareUsage: General/General FreeSoftwareUsage.rst\n'
+    def test_does_not_strip_rst_content(self):
+        """
+        The RST content itself is preserved.
+        """
+        self.assertConvertedContent(
+            'some content',
+            '{{{#!rst some content}}}'
         )
 
-    # TODO: test links in directories above/sideways of current file
-    # from Development/Development Environment.rst, we have a link
-    # to :trac:`wiki:Infrastructure/OS/Windows`.
-    # This must be translated as `../Infrastructure/OS/Infrastructure OS Windows.rst`?
+    def test_trac_rst_wiki_link(self):
+        """Converts a Trac RST :wiki: directive to an inline link"""
 
-    # Questions:
-    # - How to test on files? bash?
-    # - test just convert_file?
-    # - Are these scripts used anywhere automated? I had to rename them.
+        self.assertConvertedContent(
+            '`Requirements <Requirements.rst>`__',
+            ':trac:`wiki:Requirements`'
+        )
+
+    def test_trac_rst_wiki_link_to_page_in_subdir(self):
+        """
+        Converts Trac RST :wiki: directives to pages in subdirectories.
+        Makes sure to quote spaces in the URL.
+        """
+
+        self.assertConvertedContent(
+            '`General/FreeSoftwareUsage <General/General%20FreeSoftwareUsage.rst>`__',
+            ':trac:`wiki:General/FreeSoftwareUsage`'
+        )
+
+    def test_several_trac_wiki_rst_links_with_content(self):
+        """
+        Converts several Trac RST :wiki: directives with content around them
+        """
+
+        self.assertConvertedContent(
+            '* `Requirements <Requirements.rst>`__\n'
+            '* Some content\n'
+            '* `General/FreeSoftwareUsage <General/General%20FreeSoftwareUsage.rst>`__'
+            ' List of free software used by Chevah Project.',
+
+            '* :trac:`wiki:Requirements`\n'
+            '* Some content\n'
+            '* :trac:`wiki:General/FreeSoftwareUsage`'
+            ' List of free software used by Chevah Project.'
+        )
 
 
 if __name__ == '__main__':
