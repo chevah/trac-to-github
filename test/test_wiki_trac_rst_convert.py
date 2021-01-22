@@ -41,39 +41,57 @@ class TracRstToVanillaRst(unittest.TestCase):
         )
 
     def test_trac_rst_wiki_link(self):
-        """Converts a Trac RST :wiki: directive to an inline link"""
+        """
+        Converts a Trac RST :wiki: directive to an inline link.
+        GitHub does not add `.rst` at the end of the URL.
+        """
 
         self.assertConvertedContent(
-            '`Requirements <Requirements.rst>`__',
+            '`Requirements <Requirements>`__',
             ':trac:`wiki:Requirements`'
         )
 
     def test_trac_rst_wiki_link_to_page_in_subdir(self):
         """
         Converts Trac RST :wiki: directives to pages in subdirectories.
-        Makes sure to quote spaces in the URL.
+
+        - Spaces in the URL are converted to dashes by GitHub.
+        - The subdirectory is not shown by GitHub, all pages appear
+            at the same level.
         """
 
         self.assertConvertedContent(
-            '`General/FreeSoftwareUsage <General/General%20FreeSoftwareUsage.rst>`__',
+            '`General/FreeSoftwareUsage <General-FreeSoftwareUsage>`__',
             ':trac:`wiki:General/FreeSoftwareUsage`'
         )
 
     def test_several_trac_wiki_rst_links_with_content(self):
         """
-        Converts several Trac RST :wiki: directives with content around them
+        Converts several Trac RST :wiki: directives with content around them.
         """
 
         self.assertConvertedContent(
-            '* `Requirements <Requirements.rst>`__\n'
+            '* `Requirements <Requirements>`__\n'
             '* Some content\n'
-            '* `General/FreeSoftwareUsage <General/General%20FreeSoftwareUsage.rst>`__'
+            '* `General/FreeSoftwareUsage <General-FreeSoftwareUsage>`__'
             ' List of free software used by Chevah Project.',
 
             '* :trac:`wiki:Requirements`\n'
             '* Some content\n'
             '* :trac:`wiki:General/FreeSoftwareUsage`'
             ' List of free software used by Chevah Project.'
+        )
+
+    def test_several_links(self):
+        """Converts several Trac RST links on the same line."""
+        self.assertConvertedContent(
+            '* `Requirements <Requirements>`__'
+            '* `General/FreeSoftwareUsage <General-FreeSoftwareUsage>`__'
+            '* `General/FreeSoftwareUsage <General-FreeSoftwareUsage>`__',
+
+            '* :trac:`wiki:Requirements`'
+            '* :trac:`wiki:General/FreeSoftwareUsage`'
+            '* :trac:`wiki:General/FreeSoftwareUsage`'
         )
 
 
