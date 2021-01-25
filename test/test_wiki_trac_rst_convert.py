@@ -3,7 +3,7 @@ import unittest
 from wiki_trac_rst_convert import convert_content
 
 
-class TracRstToVanillaRst(unittest.TestCase):
+class TracToVanillaRst(unittest.TestCase):
     """
     Test conversion of content from Trac-flavored reStructuredText to
     vanilla reStructuredText, that is supported by GitHub
@@ -105,6 +105,59 @@ class TracRstToVanillaRst(unittest.TestCase):
             '* Some content\n'
             '* :trac:`wiki:General/FreeSoftwareUsage`'
             ' List of free software used by Chevah Project.'
+        )
+
+    def test_tracwiki_general_link(self):
+        """
+        Process general links from TracWiki format to plain RST links
+        """
+        self.assertConvertedContent(
+            '`Buildbot <https://chevah.com/buildbot/>`_\n',
+            '[https://chevah.com/buildbot/ Buildbot]'
+        )
+
+    def test_tracwiki_wiki_link(self):
+        """
+        Process wiki links from TracWiki format to GitHub-compatible
+        RST wiki links.
+        There are various combinations of no-link-text, link-text-same-
+        as-article-name, and link-text-different-from-article-name.
+        """
+        self.assertConvertedContent(
+            '`Project management and administration <Administrative>`_\n',
+            '[wiki:Administrative Project management and administration]'
+        )
+        self.assertConvertedContent(
+            '`<Administrative>`_\n',
+            '[wiki:Administrative Administrative]'
+        )
+        self.assertConvertedContent(
+            '`<Administrative>`_\n',
+            '[wiki:"Administrative"]'
+        )
+        self.assertConvertedContent(
+            '`<Administrative-AllHandMeeting-Past>`_\n',
+            '[wiki:"Administrative/AllHandMeeting/Past"]'
+        )
+        self.assertConvertedContent(
+            '`<Infrastructure-Services-FileServer>`_\n',
+            '`[wiki:Infrastructure/Services/FileServer]`:trac:'
+        )
+        self.assertConvertedContent(
+            '`Overton <Infrastructure-Machines-Overton>`_\n',
+            '`[wiki:Infrastructure/Machines/Overton Overton]`:trac:'
+        )
+
+    def test_trac_ticket(self):
+        """
+        Trac tickets get forwarded to the correct address.
+        This use case requires `config.py` with the following setting:
+
+        TRAC_TICKET_PREFIX = 'https://trac.chevah.com/ticket/'
+        """
+        self.assertConvertedContent(
+            '`Trac #738 <https://trac.chevah.com/ticket/738>`_\n',
+            ':trac:`#738`'
         )
 
 

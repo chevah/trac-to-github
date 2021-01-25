@@ -2,3 +2,5 @@
 USER_MAPPING = {
     'adi': ('adiroiban', 'Adi Roiban <adi.roiban@chevah.com>'),
     }
+
+TRAC_TICKET_PREFIX = 'https://trac.chevah.com/ticket/'
