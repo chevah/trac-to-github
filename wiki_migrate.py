@@ -44,7 +44,6 @@ def main():
 
             print("Adding", name)
 
-            create_dirs(name)
             write_file(name, text)
             commit_change(name, author, comment, timestamp / 1000000)
 
@@ -61,30 +60,7 @@ def get_page_name(name):
     """
     name = PAGE_NAME_MAPPING.get(name, name)
 
-    file_name = name.replace('/', ' ') + FILE_EXTENSION
-
-    parts = name.split('/')[:-1]
-    dir_name = ''
-
-    if parts:
-        dir_name = os.path.join(*parts)
-
-    return os.path.join(dir_name, file_name)
-
-
-def create_dirs(name):
-    """
-    Create the required directories for name.
-    """
-
-    parent = ''
-    for part in name.split('/')[:-1]:
-        parent = os.path.join(parent, part)
-        if os.path.exists(parent):
-            continue
-        os.mkdir(parent)
-
-
+    return name.replace('/', ' ').strip() + FILE_EXTENSION
 
 
 def write_file(name, text):
