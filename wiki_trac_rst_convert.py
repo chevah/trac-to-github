@@ -1,4 +1,4 @@
-# Convert local files formated in Trac Wiki RST to Vanilla RST.
+# Convert local files formated in Trac Wiki RST to GitHub RST.
 import re
 import sys
 import os
@@ -34,41 +34,53 @@ def convert_file(path: str):
 
 def convert_content(text: str):
     """
-    Convert from Trac wiki RST format to standard RST format.
+    Convert from Trac wiki RST format to GitHub RST format.
+
+    * Remove RST wrapping
+    * Convert Trac wiki directives to GitHub wiki links.
     """
-    # Remove RST wrapping.
-    result = text.strip('}}}')
-    result = result.strip('{{{')
-    result = result.replace('#!rst', '')
-    result = result.strip()
-    result = _trac_rst_wiki_to_plain_links(result)
 
-    return result
+    to_remove = ['{{{', '#!rst', '}}}']
+    for seq in to_remove:
+        text = text.replace(seq, '')
+    text = text.strip() + '\n'
+    text = _trac_rst_wiki_to_github_links(text)
+
+    return text
 
 
-def _trac_rst_wiki_to_plain_links(text: str):
+def _trac_rst_wiki_to_github_links(text: str):
     """
     Takes RST content with Trac wiki link directives
-    and coverts the directives to single-line RST vanilla links.
+    and coverts the directives to inline GitHub wiki links.
     """
 
-    link_re = re.compile(':trac:`wiki:(.+?)`')
-    wiki_titles = re.findall(link_re, text)
-    for title in wiki_titles:
-        text = re.sub(
-            link_re,
-            rf'`\1 <{_wiki_url(title)}>`__',
-            text,
-            1
-        )
+    link_matchers =[re.compile(r) for r in [
+        ':trac:`wiki:(.+?)`',
+        '`wiki:(.+?)`:trac:'
+    ]]
+
+    for link_re in link_matchers:
+        wiki_titles = re.findall(link_re, text)
+        for title in wiki_titles:
+            text = re.sub(
+                link_re,
+                rf'`\1 <{_wiki_url(title)}>`__',
+                text,
+                1
+            )
 
     return text
 
 
 def _wiki_url(title):
     """
-    GitHub Wiki collapses directory structure, replacing subdirectories
-    with dashes in the URL.
+    GitHub Wiki collapses directory structure.
+
+    After `wiki_migrate.py` replaced the path separator `/` with space,
+    GitHub converts spaces to dashes in the URLs.
+
+    Therefore, the original Trac links must get dashes as well.
     """
 
     return title.replace('/', '-')
