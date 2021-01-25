@@ -25,6 +25,6 @@ You might want to add a `_Sidebar.rst` file in the root wit::
     * `<Infrastructure>`_
     * `<Support>`_
 
-For wiki content convertion::
+For wiki content conversion::
 
     python wiki_trac_rst_convert.py PATH/TO/GIT-REPO
