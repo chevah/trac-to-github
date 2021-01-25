@@ -14,84 +14,90 @@ class TracRstToVanillaRst(unittest.TestCase):
         Run the Trac RST `source` through the converter,
         and assert that the output equals `expected`.
         """
-        self.assertEqual(convert_content(source), expected)
+        self.assertEqual(expected, convert_content(source))
 
     def test_empty(self):
-        """Ensures that an empty string is returned unchanged."""
-        self.assertConvertedContent('', '')
+        """
+        An empty string is appended a blank line.
+
+        A file not ending in a newline character is not POSIX compliant,
+        and may result in complaints from programs, like `git diff`
+        saying "\ No newline at end of file".
+        https://stackoverflow.com/a/729795/235463
+        """
+        self.assertConvertedContent('\n', '')
+
+    def test_newline(self):
+        """
+        A newline should not be appended another newline.
+        """
+        self.assertConvertedContent('\n', '\n')
 
     def test_removes_rst_wrapping(self):
         """
-        Removes the Trac RST markers, as well as the newlines around the
-        RST content.
-
         The Trac wiki syntax requires reStructuredText to be wrapped in
-        {{{ #!rst ... }}} blocks. Here, we make sure they don't appear
-        in the output.
+        {{{ #!rst }}} markers.
+        They must be removed from the output.
         """
-        self.assertConvertedContent('', '{{{\n#!rst\n}}}')
+        self.assertConvertedContent('\n', '{{{#!rst}}}')
 
-    def test_does_not_strip_rst_content(self):
+    def test_does_not_strip_content(self):
         """
-        The RST content itself is preserved.
+        Both RST and non-RST content is preserved, after stripping the markers.
         """
         self.assertConvertedContent(
-            'some content',
-            '{{{#!rst some content}}}'
+            'some RST content and some non-RST content\n',
+            '{{{#!rst some RST content}}} and some non-RST content'
         )
 
     def test_trac_rst_wiki_link(self):
         """
-        Converts a Trac RST :wiki: directive to an inline link.
-        GitHub does not add `.rst` at the end of the URL.
+        Converts a Trac RST :wiki: directive to a GitHub wiki link.
         """
 
         self.assertConvertedContent(
-            '`Requirements <Requirements>`__',
+            '`Requirements <Requirements>`__\n',
             ':trac:`wiki:Requirements`'
         )
 
     def test_trac_rst_wiki_link_to_page_in_subdir(self):
         """
-        Converts Trac RST :wiki: directives to pages in subdirectories.
-
-        - Spaces in the URL are converted to dashes by GitHub.
-        - The subdirectory is not shown by GitHub, all pages appear
-            at the same level.
+        Converts Trac RST :wiki: directives to pages in subdirectories
+        into GitHub wiki pages, which always have a link at root-level.
         """
 
         self.assertConvertedContent(
-            '`General/FreeSoftwareUsage <General-FreeSoftwareUsage>`__',
+            '`General/FreeSoftwareUsage <General-FreeSoftwareUsage>`__\n',
             ':trac:`wiki:General/FreeSoftwareUsage`'
+        )
+
+    def test_trac_rst_wiki_reverse_link(self):
+        """
+        Some Trac RST wiki links are "reversed", with the URL first and
+        the `:trac:` marker last. Handle them.
+        """
+
+        self.assertConvertedContent(
+            '`Infrastructure/Services/LAN#services <Infrastructure-Services-LAN#services>`__\n',
+            '`wiki:Infrastructure/Services/LAN#services`:trac:'
         )
 
     def test_several_trac_wiki_rst_links_with_content(self):
         """
         Converts several Trac RST :wiki: directives with content around them.
+        Preserves all content and links.
         """
 
         self.assertConvertedContent(
             '* `Requirements <Requirements>`__\n'
             '* Some content\n'
             '* `General/FreeSoftwareUsage <General-FreeSoftwareUsage>`__'
-            ' List of free software used by Chevah Project.',
+            ' List of free software used by Chevah Project.\n',
 
             '* :trac:`wiki:Requirements`\n'
             '* Some content\n'
             '* :trac:`wiki:General/FreeSoftwareUsage`'
             ' List of free software used by Chevah Project.'
-        )
-
-    def test_several_links(self):
-        """Converts several Trac RST links on the same line."""
-        self.assertConvertedContent(
-            '* `Requirements <Requirements>`__'
-            '* `General/FreeSoftwareUsage <General-FreeSoftwareUsage>`__'
-            '* `General/FreeSoftwareUsage <General-FreeSoftwareUsage>`__',
-
-            '* :trac:`wiki:Requirements`'
-            '* :trac:`wiki:General/FreeSoftwareUsage`'
-            '* :trac:`wiki:General/FreeSoftwareUsage`'
         )
 
 
