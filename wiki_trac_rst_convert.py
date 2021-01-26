@@ -65,7 +65,7 @@ def _trac_rst_wiki_to_github_links(text: str):
         for title in wiki_titles:
             text = re.sub(
                 link_re,
-                rf'`\1 <{_wiki_url(title)}>`__',
+                rf'`<{_wiki_url(title)}>`_',
                 text,
                 1
             )
