@@ -22,14 +22,14 @@ class TracRstToVanillaRst(unittest.TestCase):
 
         A file not ending in a newline character is not POSIX compliant,
         and may result in complaints from programs, like `git diff`
-        saying "\ No newline at end of file".
+        saying "No newline at end of file".
         https://stackoverflow.com/a/729795/235463
         """
         self.assertConvertedContent('\n', '')
 
     def test_newline(self):
         """
-        A newline should not be appended another newline.
+        A newline will not get appended another newline.
         """
         self.assertConvertedContent('\n', '\n')
 
@@ -37,9 +37,16 @@ class TracRstToVanillaRst(unittest.TestCase):
         """
         The Trac wiki syntax requires reStructuredText to be wrapped in
         {{{ #!rst }}} markers.
-        They must be removed from the output.
+        It removes the TracWiki RST armor markup from the output.
         """
         self.assertConvertedContent('\n', '{{{#!rst}}}')
+        self.assertConvertedContent(
+            '\n',
+            '\n'
+            '{{{\n'
+            '#!rst'
+            '\n'
+            '}}}')
 
     def test_does_not_strip_content(self):
         """
@@ -56,7 +63,7 @@ class TracRstToVanillaRst(unittest.TestCase):
         """
 
         self.assertConvertedContent(
-            '`Requirements <Requirements>`__\n',
+            '`<Requirements>`_\n',
             ':trac:`wiki:Requirements`'
         )
 
@@ -67,18 +74,18 @@ class TracRstToVanillaRst(unittest.TestCase):
         """
 
         self.assertConvertedContent(
-            '`General/FreeSoftwareUsage <General-FreeSoftwareUsage>`__\n',
+            '`<General-FreeSoftwareUsage>`_\n',
             ':trac:`wiki:General/FreeSoftwareUsage`'
         )
 
     def test_trac_rst_wiki_reverse_link(self):
         """
-        Some Trac RST wiki links are "reversed", with the URL first and
-        the `:trac:` marker last. Handle them.
+        Trac RST wiki links that are "reversed", with the URL first and
+        the `:trac:` marker last are also handled.
         """
 
         self.assertConvertedContent(
-            '`Infrastructure/Services/LAN#services <Infrastructure-Services-LAN#services>`__\n',
+            '`<Infrastructure-Services-LAN#services>`_\n',
             '`wiki:Infrastructure/Services/LAN#services`:trac:'
         )
 
@@ -89,9 +96,9 @@ class TracRstToVanillaRst(unittest.TestCase):
         """
 
         self.assertConvertedContent(
-            '* `Requirements <Requirements>`__\n'
+            '* `<Requirements>`_\n'
             '* Some content\n'
-            '* `General/FreeSoftwareUsage <General-FreeSoftwareUsage>`__'
+            '* `<General-FreeSoftwareUsage>`_'
             ' List of free software used by Chevah Project.\n',
 
             '* :trac:`wiki:Requirements`\n'
