@@ -14,11 +14,13 @@ Create a virtualenv::
     mv config.py.sample config.py
 
 
-For wiki migration::
+For wiki migration.
+All pages are generated into a flat file structure.
+Spaces are used instead of path separators::
 
     python wiki_migrate.py PATH/TO/Trac.DB PATH/TO/GIT-REPO
 
-You might want to add a `_Sidebar.rst` file in the root wit::
+You might want to add a `_Sidebar.rst` file in the root with::
 
     * `<Administrative>`_
     * `<Development>`_
@@ -28,3 +30,10 @@ You might want to add a `_Sidebar.rst` file in the root wit::
 For wiki content conversion::
 
     python wiki_trac_rst_convert.py PATH/TO/GIT-REPO
+
+
+Things that are not yet auto-converted:
+
+* TracWiki 3rd level heading `=== Some sub-section ===`
+* Sub-pages listing macro `[[TitleIndex(Development/)]]`
+* Local table of content `[[PageOutline]]`
