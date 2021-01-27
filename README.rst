@@ -41,3 +41,4 @@ Things that are not yet auto-converted:
 * TracWiki 3rd level heading `=== Some sub-section ===`
 * Sub-pages listing macro `[[TitleIndex(Development/)]]`
 * Local table of content `[[PageOutline]]`
+* Manually create _Sidebar.rst and _Footer.rst GitHub wiki meta-pages.
