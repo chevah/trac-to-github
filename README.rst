@@ -25,6 +25,8 @@ You might want to add a `_Sidebar.rst` file in the root with::
     * `<Administrative>`_
     * `<Development>`_
     * `<Infrastructure>`_
+     * `<Infrastructure-Services>`_
+     * `<Infrastructure-Machines>`_
     * `<Support>`_
 
 For wiki content conversion::
