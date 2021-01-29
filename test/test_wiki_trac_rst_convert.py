@@ -14,14 +14,24 @@ class TracToGitHubRST(unittest.TestCase):
         Run the Trac RST `source` through the converter,
         and assert that the output equals `expected`.
 
-        Also expects the content to end with a newline. The newline is
-        added here for convenience and readability of test cases.
+        In addition, expects the content to end with a newline.
+        The newline is added here for convenience
+        and readability of test cases.
+
+        Also expects the content to start with a `contents` directive.
         """
-        self.assertEqual(expected + '\n', convert_content(source))
+        self.assertEqual(
+            '.. contents::\n'
+            '\n' +
+            expected + '\n',
+
+            convert_content(source)
+        )
 
     def test_empty(self):
         """
-        An empty string is appended a blank line.
+        An empty string is prepended a `contents` directive and
+        appended a blank line.
 
         A file not ending in a newline character is not POSIX compliant,
         and may result in complaints from programs, like `git diff`
@@ -35,6 +45,41 @@ class TracToGitHubRST(unittest.TestCase):
         A newline will not get appended another newline.
         """
         self.assertConvertedContent('', '\n')
+
+    def test_single_content_directive(self):
+        """
+        Ensure only one RST content directive, not multiple.
+        """
+
+        self.assertConvertedContent(
+            'Sample content',
+
+            '.. contents::\n'
+            '\n'
+            'Sample content'
+        )
+
+        self.assertConvertedContent(
+            'Sample content',
+
+            '..  contents::\n'
+            '\n'
+            'Sample content'
+        )
+
+    def test_remove_tracwiki_pageoutline(self):
+        """
+        Make sure no TracWiki [[PageOutline]] directives remain.
+        """
+
+        self.assertConvertedContent(
+            'Sample content',
+
+            '[[PageOutline]]\n'
+            '\n'
+            'Sample content'
+        )
+
 
     def test_removes_rst_wrapping(self):
         """

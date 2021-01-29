@@ -25,13 +25,21 @@ def convert_file(path: str):
     """
     In-place conversion of files; no backup.
     """
-    if '.git' not in path:
+    if _path_allowed(path):
         print('Converting ', path)
         with open(path) as f:
             text = f.read()
 
         with open(path, 'w') as f:
             f.write(convert_content(text))
+
+
+def _path_allowed(path: str):
+    """
+    Only work on actual rst and rest documents.
+    """
+
+    return path.endswith('rst') or path.endswith('rest')
 
 
 def convert_content(text: str):
@@ -46,7 +54,9 @@ def convert_content(text: str):
     to_remove = ['{{{', '#!rst', '}}}']
     for seq in to_remove:
         text = text.replace(seq, '')
+    text = _remove_page_outline(text)
     text = text.strip() + '\n'
+    text = _ensure_rst_content_directive(text)
     text = _trac_to_github_wiki_links(text)
     text = _tracwiki_to_rst_links(text)
     text = _tracwiki_wiki_link_with_text_to_github_links(text)
@@ -57,6 +67,30 @@ def convert_content(text: str):
     text = _tracwiki_list_separate_from_paragraph(text)
 
     return text
+
+
+def _remove_page_outline(text: str):
+    """
+    Remove the TracWiki PageOutline directive
+    """
+    return text.replace('[[PageOutline]]', '')
+
+
+def _ensure_rst_content_directive(text: str):
+    """
+    Ensures the existence of a `contents` directive in every document.
+    """
+
+    directive = r'\.\.(\ +)contents::\n'
+
+    if not _matches(directive, text):
+        return (
+            '.. contents::\n'
+            '\n' +
+            text
+        )
+    else:
+        return _sub(directive, '.. contents::\n', text)
 
 
 def _trac_to_github_wiki_links(text: str):
@@ -71,8 +105,8 @@ def _trac_to_github_wiki_links(text: str):
         '`wiki:(.+?)`:trac:',
 
         # TracWiki markup:
-        '`\[wiki:"?([^ ]+?)"?]`:trac:',
-        '\[wiki:"?([^ ]+?)"?]',
+        r'`\[wiki:"?([^ ]+?)"?]`:trac:',
+        r'\[wiki:"?([^ ]+?)"?]',
     ]
 
     for link_re in link_matchers:
@@ -89,7 +123,7 @@ def _tracwiki_to_rst_links(text: str):
 
     url = '[a-z]+://[^ ]+'
     link_text = '[^]]+'
-    link_re = f'\[({url}) ({link_text})]'
+    link_re = rf'\[({url}) ({link_text})]'
 
     for url, link_text in _matches(link_re, text):
         text = _sub(link_re, f'`{link_text} <{url}>`_', text)
@@ -109,8 +143,8 @@ def _tracwiki_wiki_link_with_text_to_github_links(text: str):
     link_text = '[^]]+'
 
     link_matchers = [
-        f'`\[wiki:({title}) ({link_text})]`:trac:',
-        f'\[wiki:({title}) ({link_text})]',
+        rf'`\[wiki:({title}) ({link_text})]`:trac:',
+        rf'\[wiki:({title}) ({link_text})]',
     ]
 
     for link_re in link_matchers:
@@ -190,7 +224,7 @@ def _tracwiki_list_dedent(text: str):
     before the asterisk.
     """
 
-    indented_list_item_re = '^ \* '
+    indented_list_item_re = r'^ \* '
     for _ in _matches(indented_list_item_re, text):
         text = _sub(indented_list_item_re, '* ', text)
 
@@ -208,7 +242,7 @@ def _tracwiki_list_separate_from_paragraph(text: str):
     was_list_item_or_blank = True
 
     for l in lines:
-        is_list_item = re.match('^ *\* .*', l)
+        is_list_item = re.match(r'^ *\* .*', l)
         if is_list_item:
             if not was_list_item_or_blank:
                 newlines.append('')
