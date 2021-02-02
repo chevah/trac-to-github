@@ -14,14 +14,24 @@ class TracToGitHubRST(unittest.TestCase):
         Run the Trac RST `source` through the converter,
         and assert that the output equals `expected`.
 
-        Also expects the content to end with a newline. The newline is
-        added here for convenience and readability of test cases.
+        In addition, expects the content to end with a newline.
+        The newline is added here for convenience
+        and readability of test cases.
+
+        Also expects the content to start with a `contents` directive.
         """
-        self.assertEqual(expected + '\n', convert_content(source))
+        self.assertEqual(
+            '.. contents::\n'
+            '\n' +
+            expected + '\n',
+
+            convert_content(source)
+        )
 
     def test_empty(self):
         """
-        An empty string is appended a blank line.
+        An empty string is prepended a `contents` directive and
+        appended a blank line.
 
         A file not ending in a newline character is not POSIX compliant,
         and may result in complaints from programs, like `git diff`
@@ -35,6 +45,110 @@ class TracToGitHubRST(unittest.TestCase):
         A newline will not get appended another newline.
         """
         self.assertConvertedContent('', '\n')
+
+    def test_insert_rst_toc(self):
+        """
+        Pages without RST or TracWiki local TOC markup
+        will have a single RST local TOC inserted at the start of the page,
+        before the first section.
+        """
+        self.assertEqual(
+            '.. contents::\n'
+            '\n'
+            'Content\n',
+
+            convert_content('Content')
+        )
+
+    def test_single_content_directive(self):
+        """
+        Pages that already have a RST local TOC at the start of the page
+        are not changed.
+        """
+        self.assertEqual(
+            '.. contents::\n'
+            '\n'
+            'Sample content\n',
+
+            convert_content(
+                '.. contents::\n'
+                '\n'
+                'Sample content'
+            )
+        )
+
+    def test_move_tocs_to_top(self):
+        """
+        Pages that already have a RST local TOC inside the content
+        (not at the top of the page), or have multiple local TOCs,
+        will have them removed
+        and a new local TOC is inserted at the start of the page.
+        """
+        self.assertEqual(
+            '.. contents::\n'
+            '\n'
+            'Sample content\n',
+
+            convert_content(
+                'Sample content\n'
+                '.. contents::\n'
+            )
+        )
+        self.assertEqual(
+            '.. contents::\n'
+            '\n'
+            'Sample content\n',
+
+            convert_content(
+                'Sample content\n'
+                '.. contents::\n'
+                '.. contents::\n'
+            )
+        )
+
+    def test_remove_content_directive_with_extra_space(self):
+        """
+        Cleans a `contents` directive with too many spaces
+        between the `..` and the `contents::` part.
+        """
+        self.assertConvertedContent(
+            'Sample content',
+
+            '..  contents::\n'
+            '\n'
+            'Sample content'
+        )
+
+    def test_remove_tracwiki_pageoutline(self):
+        """
+        Pages that have one or more TracWiki local TOC (PageOutline)
+        will have them removed and replaced with a single RST local TOC.
+        """
+
+        self.assertEqual(
+            '.. contents::\n'
+            '\n'
+            'Sample content\n',
+
+            convert_content(
+                '[[PageOutline]]\n'
+                '\n'
+                'Sample content\n'
+            )
+        )
+
+        self.assertEqual(
+            '.. contents::\n'
+            '\n'
+            'Sample content\n',
+
+            convert_content(
+                '[[PageOutline]]\n'
+                '\n'
+                'Sample content\n'
+                '[[PageOutline]]\n'
+            )
+        )
 
     def test_removes_rst_wrapping(self):
         """
