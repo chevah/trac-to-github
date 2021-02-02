@@ -46,36 +46,107 @@ class TracToGitHubRST(unittest.TestCase):
         """
         self.assertConvertedContent('', '\n')
 
-    def test_single_content_directive(self):
+    def test_insert_rst_toc(self):
         """
-        Ensure only one RST content directive, not multiple.
+        Pages without RST or TracWiki local TOC markup
+        will have a single RST local TOC inserted at the start of the page,
+        before the first section.
         """
-
-        self.assertConvertedContent(
-            'Sample content',
-
+        self.assertEqual(
             '.. contents::\n'
             '\n'
-            'Sample content'
+            'Content\n',
+
+            convert_content('Content')
         )
 
+    def test_single_content_directive(self):
+        """
+        Pages that already have a RST local TOC at the start of the page
+        are not changed.
+        """
+        self.assertEqual(
+            '.. contents::\n'
+            '\n'
+            'Sample content\n',
+
+            convert_content(
+                '.. contents::\n'
+                '\n'
+                'Sample content'
+            )
+        )
+
+    def test_move_tocs_to_top(self):
+        """
+        Pages that already have a RST local TOC inside the content
+        (not at the top of the page), or have multiple local TOCs,
+        will have them removed
+        and a new local TOC is inserted at the start of the page.
+        """
+        self.assertEqual(
+            '.. contents::\n'
+            '\n'
+            'Sample content\n',
+
+            convert_content(
+                'Sample content\n'
+                '.. contents::\n'
+            )
+        )
+        self.assertEqual(
+            '.. contents::\n'
+            '\n'
+            'Sample content\n',
+
+            convert_content(
+                'Sample content\n'
+                '.. contents::\n'
+                '.. contents::\n'
+            )
+        )
+
+
+    def test_remove_tracwiki_pageoutline(self):
+        """
+        Pages that have one or more TracWiki local TOC (PageOutline)
+        will have them removed and replaced with a single RST local TOC.
+        """
+
+        self.assertEqual(
+            '.. contents::\n'
+            '\n'
+            'Sample content\n',
+
+            convert_content(
+                '[[PageOutline]]\n'
+                '\n'
+                'Sample content\n'
+            )
+        )
+
+        self.assertEqual(
+            '.. contents::\n'
+            '\n'
+            'Sample content\n',
+
+            convert_content(
+                '[[PageOutline]]\n'
+                '\n'
+                'Sample content\n'
+                '[[PageOutline]]\n'
+            )
+        )
+
+    def test_remove_content_directive_with_extra_space(self):
+        """
+        Cleans a `contents` directive with too many spaces
+        between the `..` and the `contents::` part.
+        """
         self.assertConvertedContent(
             'Sample content',
 
             '..  contents::\n'
-            '\n'
-            'Sample content'
-        )
-
-    def test_remove_tracwiki_pageoutline(self):
-        """
-        Make sure no TracWiki [[PageOutline]] directives remain.
-        """
-
-        self.assertConvertedContent(
-            'Sample content',
-
-            '[[PageOutline]]\n'
             '\n'
             'Sample content'
         )

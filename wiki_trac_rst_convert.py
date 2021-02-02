@@ -25,7 +25,7 @@ def convert_file(path: str):
     """
     In-place conversion of files; no backup.
     """
-    if _path_allowed(path):
+    if _is_rst_file(path):
         print('Converting ', path)
         with open(path) as f:
             text = f.read()
@@ -34,11 +34,11 @@ def convert_file(path: str):
             f.write(convert_content(text))
 
 
-def _path_allowed(path: str):
+def _is_rst_file(path: str):
     """
-    Only work on actual rst and rest documents.
+    Returns `True` if path looks like a ReStructuredText file.
     """
-
+    path = path.lower()
     return path.endswith('rst') or path.endswith('rest')
 
 
@@ -54,7 +54,8 @@ def convert_content(text: str):
     to_remove = ['{{{', '#!rst', '}}}']
     for seq in to_remove:
         text = text.replace(seq, '')
-    text = _remove_page_outline(text)
+    text = _remove_pageoutline(text)
+    text = _remove_rst_contents(text)
     text = text.strip() + '\n'
     text = _ensure_rst_content_directive(text)
     text = _trac_to_github_wiki_links(text)
@@ -69,28 +70,30 @@ def convert_content(text: str):
     return text
 
 
-def _remove_page_outline(text: str):
+def _remove_pageoutline(text: str):
     """
-    Remove the TracWiki PageOutline directive
+    Remove any TracWiki PageOutline directives
     """
     return text.replace('[[PageOutline]]', '')
 
 
+def _remove_rst_contents(text: str):
+    """
+    Remove any RST `contents` directives
+    """
+    directive = r'\.\.(\ +)contents::\n'
+    return re.sub(directive, '', text)
+
+
 def _ensure_rst_content_directive(text: str):
     """
-    Ensures the existence of a `contents` directive in every document.
+    Ensures a `contents` directive at the top of every document.
     """
-
-    directive = r'\.\.(\ +)contents::\n'
-
-    if not _matches(directive, text):
-        return (
-            '.. contents::\n'
-            '\n' +
-            text
-        )
-    else:
-        return _sub(directive, '.. contents::\n', text)
+    return (
+        '.. contents::\n'
+        '\n' +
+        text
+    )
 
 
 def _trac_to_github_wiki_links(text: str):
