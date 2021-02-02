@@ -106,6 +106,18 @@ class TracToGitHubRST(unittest.TestCase):
             )
         )
 
+    def test_remove_content_directive_with_extra_space(self):
+        """
+        Cleans a `contents` directive with too many spaces
+        between the `..` and the `contents::` part.
+        """
+        self.assertConvertedContent(
+            'Sample content',
+
+            '..  contents::\n'
+            '\n'
+            'Sample content'
+        )
 
     def test_remove_tracwiki_pageoutline(self):
         """
@@ -137,20 +149,6 @@ class TracToGitHubRST(unittest.TestCase):
                 '[[PageOutline]]\n'
             )
         )
-
-    def test_remove_content_directive_with_extra_space(self):
-        """
-        Cleans a `contents` directive with too many spaces
-        between the `..` and the `contents::` part.
-        """
-        self.assertConvertedContent(
-            'Sample content',
-
-            '..  contents::\n'
-            '\n'
-            'Sample content'
-        )
-
 
     def test_removes_rst_wrapping(self):
         """
