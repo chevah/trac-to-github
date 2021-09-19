@@ -1,11 +1,23 @@
 trac-to-github
 ==============
 
-Hacks used to migrate from Trac sqlite to GitHub.
+Hacks used to migrate from Trac sqlite or Postgresql dump to GitHub.
 
 Works with Python 3.8.
 
 For wiki migration, you will need git available in your dev environment.
+
+This is a 2 stage process:
+
+1. Convert the wiki pages using native Trac wiki content.
+   This is done to have better diffs
+
+2. Convert the last version of the each wiki page to ReStructuredText,
+   or any other format.
+
+
+Convert to git repo
+===================
 
 Create a virtualenv::
 
@@ -13,12 +25,12 @@ Create a virtualenv::
     . build/bin/activate
     mv config.py.sample config.py
 
+Modify the config.py values.
 
-For wiki migration.
 All pages are generated into a flat file structure.
 Spaces are used instead of path separators::
 
-    python wiki_migrate.py PATH/TO/Trac.DB PATH/TO/GIT-REPO
+    python wiki_migrate.py PATH/TO/Trac.db3 PATH/TO/GIT-REPO
 
 You might want to add a `_Sidebar.rst` file in the root with::
 
@@ -30,6 +42,10 @@ You might want to add a `_Sidebar.rst` file in the root with::
       * `Machines <Infrastructure-Machines>`_
 
     * `<Support>`_
+
+
+Convert the content to RST
+==========================
 
 For wiki content conversion::
 
