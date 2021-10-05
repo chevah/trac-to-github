@@ -4,3 +4,11 @@ USER_MAPPING = {
     }
 
 TRAC_TICKET_PREFIX = 'https://trac.chevah.com/ticket/'
+
+# Component to GitHub repository mapping
+REPOSITORY_MAPPING = {
+    'client': 'client',
+    'commons': 'commons',
+}
+
+FALLBACK_REPOSITORY = 'server'
