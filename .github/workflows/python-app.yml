@@ -26,7 +26,6 @@ jobs:
           pip install flake8==3.8.4 pytest==6.1.2
       - name: Lint with flake8
         run: |
-          # stop the build if there are Python syntax errors or undefined names
           flake8
       - name: Prepare config
         run: |
