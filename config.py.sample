@@ -10,5 +10,6 @@ REPOSITORY_MAPPING = {
     'client': 'client',
     'commons': 'commons',
 }
-
 FALLBACK_REPOSITORY = 'server'
+
+OWNER = 'chevah'

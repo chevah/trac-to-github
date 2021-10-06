@@ -1,6 +1,6 @@
 import unittest
 
-from ticket_migrate import get_repo, get_labels, labels_from_keywords
+import ticket_migrate as tm
 
 
 class TestRepositoryMapping(unittest.TestCase):
@@ -16,9 +16,9 @@ class TestRepositoryMapping(unittest.TestCase):
         Check that the issue is opened in the correct GitHub repository
         based on the Trac component.
         """
-        self.assertEqual(get_repo('client'), 'client')
-        self.assertEqual(get_repo('commons'), 'commons')
-        self.assertEqual(get_repo('fallback'), 'server')
+        self.assertEqual(tm.get_repo('client'), 'client')
+        self.assertEqual(tm.get_repo('commons'), 'commons')
+        self.assertEqual(tm.get_repo('fallback'), 'server')
 
 
 class TestLabelMapping(unittest.TestCase):
@@ -36,31 +36,31 @@ class TestLabelMapping(unittest.TestCase):
         # Split by space.
         self.assertEqual(
             {'easy', 'tech-debt'},
-            labels_from_keywords('easy tech-debt'))
+            tm.labels_from_keywords('easy tech-debt'))
 
         # Remove commas.
-        self.assertEqual({'tech-debt'}, labels_from_keywords('tech-debt,'))
+        self.assertEqual({'tech-debt'}, tm.labels_from_keywords('tech-debt,'))
         self.assertEqual(
             {'tech-debt', 'feature'},
-            labels_from_keywords('tech-debt, feature'))
+            tm.labels_from_keywords('tech-debt, feature'))
 
         # Fix typos.
         self.assertEqual(
             {'tech-debt', 'easy'},
-            labels_from_keywords('tech-dept easy'))
+            tm.labels_from_keywords('tech-dept easy'))
         self.assertEqual(
             {'tech-debt'},
-            labels_from_keywords('tech-deb'))
+            tm.labels_from_keywords('tech-deb'))
 
         # Discard unknown words to prevent tag explosion.
         self.assertEqual(
             set(),
-            labels_from_keywords('unknown-tag'))
+            tm.labels_from_keywords('unknown-tag'))
 
         # Deduplicate.
         self.assertEqual(
             {'tech-debt'},
-            labels_from_keywords('tech-deb, tech-debt tech-dept'))
+            tm.labels_from_keywords('tech-deb, tech-debt tech-dept'))
 
     def test_get_labels_none(self):
         """
@@ -69,17 +69,28 @@ class TestLabelMapping(unittest.TestCase):
         """
         self.assertEqual(
             {'priority-low', 'tech-debt'},
-            get_labels(
+            tm.get_labels(
                 component='client', priority='Low', keywords='tech-dept'))
         self.assertEqual(
             {'priority-high'},
-            get_labels(
+            tm.get_labels(
                 component='client', priority='High', keywords=''))
 
     def test_get_labels_component_name(self):
         self.assertEqual(
             {'priority-low', 'fallback'},
-            get_labels('fallback', 'Low', ''))
+            tm.get_labels('fallback', 'Low', ''))
+
+
+class TestAssigneeMapping(unittest.TestCase):
+    """
+    Trac Owners are mapped to GitHub assignees.
+    """
+    def test_user_mapping(self):
+        self.assertEqual(['adiroiban'], tm.get_assignees('adi'))
+
+    def test_unknown_user_mapping(self):
+        self.assertEqual([], tm.get_assignees('john-doe'))
 
 
 if __name__ == '__main__':

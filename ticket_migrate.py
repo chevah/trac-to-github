@@ -1,5 +1,5 @@
 # Migrate Trac tickets to GitHub.
-from config import REPOSITORY_MAPPING, FALLBACK_REPOSITORY
+from config import REPOSITORY_MAPPING, FALLBACK_REPOSITORY, USER_MAPPING
 
 
 def get_repo(component):
@@ -64,3 +64,16 @@ def get_labels(component: str, priority: str, keywords: str):
     keyword_labels = labels_from_keywords(keywords)
     component_labels = labels_from_component(component)
     return {priority_label}.union(keyword_labels).union(component_labels)
+
+
+def get_assignees(owner):
+    """
+    Map the owner to the GitHub account.
+    """
+    try:
+        owner, _ = USER_MAPPING.get(owner)
+        return [owner]
+    except TypeError as error:
+        if 'cannot unpack non-iterable NoneType object' in str(error):
+            return []
+        raise
