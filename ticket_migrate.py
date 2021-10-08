@@ -1,5 +1,16 @@
 # Migrate Trac tickets to GitHub.
-from config import REPOSITORY_MAPPING, FALLBACK_REPOSITORY, USER_MAPPING
+
+import requests
+import sqlite3
+import sys
+from time import sleep
+from typing import Union
+
+import config
+from wiki_trac_rst_convert import convert_issue_content
+
+# Set to False to perform actual GitHub issue creation.
+DRY_RUN = False
 
 
 def get_repo(component):
@@ -7,7 +18,7 @@ def get_repo(component):
     Given the Trac component,
     choose the GitHub repository to create the issue in.
     """
-    return REPOSITORY_MAPPING.get(component, FALLBACK_REPOSITORY)
+    return config.REPOSITORY_MAPPING.get(component, config.FALLBACK_REPOSITORY)
 
 
 def labels_from_component(component: str):
@@ -15,16 +26,19 @@ def labels_from_component(component: str):
     Given the Trac component,
     choose the labels to apply on the GitHub issue, if any.
     """
-    if component in REPOSITORY_MAPPING:
+    if component in config.REPOSITORY_MAPPING:
         return []
 
     return [component]
 
 
-def labels_from_keywords(keywords: str):
+def labels_from_keywords(keywords: Union[str, None]):
     """
     Given the Trac `keywords` string, clean it up and parse it into a list.
     """
+    if keywords is None:
+        return set()
+
     keywords = keywords.replace(',', '')
     keywords = keywords.split(' ')
 
@@ -55,15 +69,25 @@ def labels_from_keywords(keywords: str):
     return {kw for kw in keywords if kw in allowed_keyword_labels}
 
 
-def get_labels(component: str, priority: str, keywords: str):
+def get_labels(component: str, priority: Union[str, None], keywords: str):
     """
     Given the Trac component, priority, and keywords,
     return the labels to apply on the GitHub issue.
     """
-    priority_label = 'priority-{}'.format(priority.lower())
+    priority_label = labels_from_priority(priority)
     keyword_labels = labels_from_keywords(keywords)
     component_labels = labels_from_component(component)
-    return {priority_label}.union(keyword_labels).union(component_labels)
+    labels = {priority_label}.union(keyword_labels).union(component_labels)
+    return sorted(labels)
+
+
+def labels_from_priority(priority):
+    """
+    Interpret None (missing) priority as Low.
+    """
+    if priority is None:
+        return 'priority-low'
+    return 'priority-{}'.format(priority.lower())
 
 
 def get_assignees(owner):
@@ -71,9 +95,240 @@ def get_assignees(owner):
     Map the owner to the GitHub account.
     """
     try:
-        owner, _ = USER_MAPPING.get(owner)
+        owner, _ = config.USER_MAPPING.get(owner)
         return [owner]
     except TypeError as error:
         if 'cannot unpack non-iterable NoneType object' in str(error):
             return []
         raise
+
+
+def parse_backtick(description):
+    """
+    Leave text as is until the closing backtick.
+    After that, let parse_body continue.
+    """
+    if not description.startswith('`'):
+        raise ValueError('Desc starts with ', description[:10])
+    description = description[1:]
+    ending = description.find('`') + 1
+    return '`' + description[:ending] + parse_body(description[ending:])
+
+
+def parse_squiggly(description):
+    """
+    Convert the squiggly brackets to triple backticks.
+    Leave text as is until the closing squiggly brackets.
+    After that, let parse_body continue.
+    """
+    if not description.startswith('{{{'):
+        raise ValueError('Desc starts with ', description[:10])
+    ending = description.find('}}}') + 3
+    return (
+        '```' +
+        description[3:ending-3] +
+        '```' + parse_body(description[ending:])
+        )
+
+
+def parse_body(description):
+    """
+    Parses text with squiggly-bracketed or backtick-surrounded monospace.
+    Converts the squiggly brackets to backtick brackets.
+    """
+    if not description:
+        return ''
+
+    def found(index):
+        """Return true if an index represents a found position in a string."""
+        return index != -1
+
+    def is_first_index(a, b):
+        """
+        Returns true if index a occurs before b, or if b does not exist.
+        """
+        return found(a) and (not found(b) or b > a)
+
+    min_backtick = description.find('`')
+    min_squiggly = description.find('{{{')
+
+    if is_first_index(min_squiggly, min_backtick):
+        return (
+            convert_issue_content(description[:min_squiggly]) +
+            parse_squiggly(description[min_squiggly:])
+            )
+
+    if is_first_index(min_backtick, min_squiggly):
+        return (
+            convert_issue_content(description[:min_backtick]) +
+            parse_backtick(description[min_backtick:])
+            )
+
+    return convert_issue_content(description)
+
+
+def get_body(description, data):
+    reporters = get_assignees(data['reporter'])
+    if reporters:
+        reporter = reporters[0]
+    else:
+        reporter = data['reporter']
+
+    body = (
+        f"T{data['t_id']} {data['t_type']} was created by {reporter}.\n"
+        "\n"
+        f"{parse_body(description)}"
+        )
+
+    return body
+
+
+class GitHubRequest:
+    """
+    A plain object holding all data needed for a GitHub issue.
+    """
+    def __init__(self, owner, repo, title, body, milestone, labels, assignees):
+        self.owner = owner
+        self.repo = repo
+        self.data = {
+            'title': title,
+            'body': body,
+            'milestone': milestone,
+            'labels': labels,
+            'assignees': assignees,
+            }
+
+    def submit(self):
+        """
+        Execute the POST request to create a GitHub issue.
+        """
+        url = f'https://api.github.com/repos/{self.owner}/{self.repo}/issues'
+
+        if DRY_RUN:
+            print(f"Would post to {url}:\n{self.data}")
+        else:
+            # Avoid crossing the rate limit (5000/hr).
+            sleep(1)
+
+            response = requests.post(
+                url=url,
+                headers={'accept': 'application/vnd.github.v3+json'},
+                json=self.data,
+                auth=(config.OAUTH_USER, config.OAUTH_TOKEN)
+                )
+
+            if response.status_code != 201:
+                print('Error: Issue not created!')
+                print(response.status_code, response.reason)
+                print(response.text)
+                print(response.headers)
+                import pdb
+                pdb.set_trace()
+
+            print(self.data['t_id'], response.json()['html_url'])
+
+    @classmethod
+    def fromTracData(
+            cls,
+            component,
+            owner,
+            summary,
+            description,
+            priority,
+            keywords,
+            **kwargs):
+        """
+        Create a GitHubRequest from Trac ticket data fields.
+        """
+        return cls(
+            owner=config.OWNER,
+            repo=get_repo(component),
+            title=summary,
+            body=get_body(description, data=kwargs),
+            milestone=None,
+            labels=get_labels(component, priority, keywords),
+            assignees=get_assignees(owner),
+            )
+
+    @classmethod
+    def fromTracDataMultiple(cls, trac_data):
+        """
+        Generate GitHubRequests from an iterable of dicts of Trac tickets.
+        """
+        for ticket in trac_data:
+            yield cls.fromTracData(**ticket)
+
+
+def read_trac_tickets():
+    """
+    Generate dicts with Trac ticket data.
+    """
+    if len(sys.argv) != 2:
+        print("Need to pass the path to Trac DB as argument.")
+        sys.exit(1)
+
+    db = sqlite3.connect(sys.argv[1])
+    for row in db.execute('SELECT * FROM ticket ORDER BY changetime'):
+        (
+            t_id,
+            t_type,
+            time,
+            changetime,
+            component,
+            severity,
+            priority,
+            owner,
+            reporter,
+            cc,
+            version,
+            milestone,
+            status,
+            resolution,
+            summary,
+            description,
+            keywords
+            ) = row
+
+        yield {
+            't_id': t_id,
+            't_type': t_type,
+            'time': time,
+            'changetime': changetime,
+            'component': component,
+            'severity': severity,
+            'priority': priority,
+            'owner': owner,
+            'reporter': reporter,
+            'cc': cc,
+            'version': version,
+            'milestone': milestone,
+            'status': status,
+            'resolution': resolution,
+            'summary': summary,
+            'description': description,
+            'keywords': keywords,
+            }
+
+
+def select_open_trac_tickets(tickets):
+    """
+    Choose only tickets which don't have a closed status.
+    """
+    for t in tickets:
+        if t['status'] != 'closed':
+            yield t
+
+
+def main():
+    """
+    Read the Trac DB and post issues to GitHub.
+    """
+
+    tickets = list(select_open_trac_tickets(read_trac_tickets()))
+
+    for issue in GitHubRequest.fromTracDataMultiple(tickets):
+        issue.submit()
+
+
+if __name__ == '__main__':
+    main()

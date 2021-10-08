@@ -59,6 +59,15 @@ def convert_content(text: str):
     text = text.strip() + '\n'
     text = _ensure_rst_content_directive(text)
     text = _trac_to_github_wiki_links(text)
+    text = convert_issue_content(text)
+
+    return text
+
+
+def convert_issue_content(text: str):
+    """
+    Convert the description of a Trac issue to GitHub RST.
+    """
     text = _tracwiki_to_rst_links(text)
     text = _tracwiki_wiki_link_with_text_to_github_links(text)
     text = _trac_ticket_links(text)
