@@ -9,11 +9,11 @@ For wiki migration, you will need git available in your dev environment.
 
 This is a 2 stage process:
 
-1. Convert the wiki pages using native Trac wiki content.
-   This is done to have better diffs
+1. Create the GitHub Wiki pages using content formated as TracWiki.
+   This is done to have better diffs between historic versions.
 
-2. Convert the last version of the each wiki page to ReStructuredText,
-   or any other format.
+2. Convert the last version of the each page to ReStructuredText,
+   or to any other format.
 
 
 Convert to git repo
