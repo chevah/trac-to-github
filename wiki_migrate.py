@@ -1,8 +1,9 @@
 """
 Generate local wiki files based on Trac DB file.
 
-* SQlite3 DB
-* PSQL dump
+Accepted DB formats:
+* SQlite3 DB (.db3)
+* PSQL dump (.psql)
 """
 import os
 import sqlite3
@@ -19,7 +20,7 @@ DRY_RUN = False
 # Wiki names to file names.
 PAGE_NAME_MAPPING = {
     'WikiStart': 'Home',
-}
+    }
 
 
 def main(args):
@@ -35,13 +36,13 @@ def main(args):
     target_repo = args[1]
 
     if db_file.endswith('.db3'):
-        return _mirate_sqlite(db_file, target_repo)
+        return _migrate_sqlite(db_file, target_repo)
 
     if db_file.endswith('.psql'):
-        return _mirate_pq_dump(db_file, target_repo)
+        return _migrate_pq_dump(db_file, target_repo)
 
 
-def _mirate_sqlite(db_file, target_repo):
+def _migrate_sqlite(db_file, target_repo):
     """
     Generate files based on SQLite3 db file.
     """
@@ -63,12 +64,11 @@ def _mirate_sqlite(db_file, target_repo):
             write_file(name, text)
             commit_change(name, author, comment, timestamp / 1000000)
 
-
     finally:
         os.chdir(start_dir)
 
 
-def _mirate_pq_dump(db_file, target_repo):
+def _migrate_pq_dump(db_file, target_repo):
     """
     Generate files based on pg_dump file.
 
@@ -101,7 +101,6 @@ def _mirate_pq_dump(db_file, target_repo):
             if not copy_started:
                 # We are still in the header
                 continue
-
 
             line = line.decode('utf-8')
 
@@ -170,7 +169,7 @@ def commit_change(path, author, comment, timestamp):
     """
     default_user = DEFAULT_GITHUB_USER
     if not default_user:
-        # Create a default git user on the fly if no fix user is configured.
+        # Create a default git user on the fly if one is not configured.
         default_user = (author, '{} <anonymous@example.com>'.format(author))
 
     git_user, git_author = USER_MAPPING.get(author, default_user)
@@ -178,7 +177,7 @@ def commit_change(path, author, comment, timestamp):
     name = path.rsplit(' ', 1)[-1]
 
     if comment:
-        message = comment + ' ' +  name + ' modified by ' + git_user
+        message = comment + ' ' + name + ' modified by ' + git_user
     else:
         message = name + ' modified by ' + git_user
 
@@ -195,6 +194,7 @@ def commit_change(path, author, comment, timestamp):
         '--author=' + git_author,
         '--date=' + git_date,
         ])
+
 
 if __name__ == '__main__':
     main(sys.argv[1:])
