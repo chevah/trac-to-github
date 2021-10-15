@@ -177,7 +177,7 @@ class TestParseBody(unittest.TestCase):
 
     def test_parse_body_convert_content(self):
         """
-        At least some TracWiki syntax is converted.
+        Headings are converted.
         """
         self.assertEqual(
             "Some Top Heading\n"
@@ -213,6 +213,31 @@ class TestParseBody(unittest.TestCase):
                 "\n"
                 "Content here}}}\n"
                 "Some other content"
+                )
+            )
+
+    def test_parse_body_convert_RST(self):
+        """
+        Leaves RST syntax as-is, does not treat it as monospace.
+        """
+        self.assertEqual(
+            "\n"
+            "\n"
+            "Problem\n"
+            "-------\n"
+            "\n"
+            "The buildslaves have a builder which automatically updates the 'deps' repo on each slave.\n"
+            "\n",
+
+            tm.parse_body(
+                "{{{\n"
+                "#!rst\n"
+                "\n"
+                "Problem\n"
+                "-------\n"
+                "\n"
+                "The buildslaves have a builder which automatically updates the 'deps' repo on each slave.\n"
+                "}}}\n"
                 )
             )
 

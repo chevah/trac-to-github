@@ -8,16 +8,10 @@ from time import sleep
 from typing import Union
 
 import config
+from wiki_trac_rst_convert import convert_issue_content
 
 # Set to False to perform actual GitHub issue creation.
 DRY_RUN = True
-
-
-def convert_issue_content(text: str):
-    """
-    Convert the description of a Trac issue to GitHub flavored Markdown.
-    """
-    return text
 
 
 def get_repo(component):
@@ -124,18 +118,25 @@ def parse_backtick(description):
 
 def parse_squiggly(description):
     """
-    Convert the squiggly brackets to triple backticks.
-    Leave text as is until the closing squiggly brackets.
+    Interpret squiggly brackets:
+
+    - If a #!rst marker is the first token,
+    remove the brackets and return the text inside.
+
+    - Otherwise, convert the brackets to triple backticks.
+    Leave text as is until the closing squiggly brackets,
+    which are again converted to triple backticks.
     After that, let parse_body continue.
     """
     if not description.startswith('{{{'):
         raise ValueError('Desc starts with ', description[:10])
     ending = description.find('}}}') + 3
-    return (
-        '```' +
-        description[3:ending-3] +
-        '```' + parse_body(description[ending:])
-        )
+    content = description[3:ending-3]
+
+    if content.strip().startswith('#!rst'):
+        return content.split('#!rst', 1)[1] + parse_body(description[ending:])
+
+    return '```' + content + '```' + parse_body(description[ending:])
 
 
 def parse_body(description):
