@@ -325,10 +325,10 @@ class TestNumberPredictor(unittest.TestCase):
 
         # Break the cache of next_numbers to prevent accidental get requests.
         self.sut.next_numbers = {
-            'server': 'not-a-number',
-            'client': 'not-a-number',
-            'commons': 'not-a-number',
-            'trac-migration-staging': 'not-a-number',
+            'server': 0,
+            'client': 0,
+            'commons': 0,
+            'trac-migration-staging': 0,
             }
 
     def test_requestNextNumber_cached(self):
@@ -414,6 +414,40 @@ class TestNumberPredictor(unittest.TestCase):
         self.assertEqual(
             self.generateTickets([2, 8, 4, 10, 6]),
             self.sut.orderTickets(tickets)
+            )
+
+    def test_orderTickets_multiple_repos(self):
+        """
+        Splits tickets correctly across repositories.
+        """
+        self.sut.next_numbers['commons'] = 7
+        self.sut.next_numbers['trac-migration-staging'] = 17
+        tickets = [
+            {'t_id': 1, 'component': 'commons'},
+            {'t_id': 7, 'component': 'commons'},
+            {'t_id': 11, 'component': 'trac-migration-staging'},
+            {'t_id': 17, 'component': 'trac-migration-staging'},
+            ]
+
+        output = self.sut.orderTickets(tickets)
+
+        commons_output = [t for t in output if t['component'] == 'commons']
+        migration_output = [
+            t for t in output if t['component'] == 'trac-migration-staging']
+
+        self.assertEqual(
+            [
+                {'t_id': 7, 'component': 'commons'},
+                {'t_id': 1, 'component': 'commons'},
+                ],
+            commons_output
+            )
+        self.assertEqual(
+            [
+                {'t_id': 17, 'component': 'trac-migration-staging'},
+                {'t_id': 11, 'component': 'trac-migration-staging'},
+                ],
+            migration_output
             )
 
 

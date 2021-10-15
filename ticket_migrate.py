@@ -315,11 +315,15 @@ class NumberPredictor:
         """
         Choose an order to create tickets on GitHub so that we maximize
         matches of GitHub IDs with Trac IDs.
+
+        Assumes Trac IDs are unique.
         """
         repositories = (
             list(config.REPOSITORY_MAPPING.values()) +
             [config.FALLBACK_REPOSITORY]
             )
+        all_repo_ordered_tickets = []
+
         for repo in set(repositories):
             self.next_numbers[repo] = self.requestNextNumber(repo)
 
@@ -356,16 +360,17 @@ class NumberPredictor:
             # Add what's left of the non-matching.
             ordered_tickets.extend(not_matching)
 
-        return ordered_tickets
+            # And add to the all-repo list.
+            all_repo_ordered_tickets.extend(ordered_tickets)
+
+        return all_repo_ordered_tickets
 
 
 def select_open_tickets(tickets):
     """
     Choose only tickets which don't have a closed status.
     """
-    for t in tickets:
-        if t['status'] != 'closed':
-            yield t
+    return [t for t in tickets if t['status'] != 'closed']
 
 
 def select_tickets_for_repo(tickets, repo: str):
