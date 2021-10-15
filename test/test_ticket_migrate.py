@@ -139,7 +139,12 @@ class TestBody(unittest.TestCase):
                 )
             )
 
+
+class TestParseBody(unittest.TestCase):
     def test_parse_body_backticks(self):
+        """
+        Monospace backticks are preserved.
+        """
         self.assertEqual(
             'text `monospace` text',
             tm.parse_body('text `monospace` text')
@@ -222,7 +227,7 @@ class TestTicketSelection(unittest.TestCase):
         """
         closed = [{'status': 'closed'}]
         self.assertEqual(
-            [], list(tm.select_open_trac_tickets(closed)))
+            [], list(tm.select_open_tickets(closed)))
 
     def test_status_open(self):
         """
@@ -237,7 +242,7 @@ class TestTicketSelection(unittest.TestCase):
             {'status': 'needs_review'},
             ]
         self.assertEqual(
-            non_closed, list(tm.select_open_trac_tickets(non_closed)))
+            non_closed, list(tm.select_open_tickets(non_closed)))
 
 
 class TestGitHubRequest(unittest.TestCase):
@@ -258,7 +263,7 @@ class TestGitHubRequest(unittest.TestCase):
             'priority': 'high',
             'keywords': 'feature, easy',
             'reporter': 'adi',
-            't_id': '321',
+            't_id': 321,
             't_type': 'task',
             }])
 
@@ -279,6 +284,112 @@ class TestGitHubRequest(unittest.TestCase):
             '\n'
             'description',
             request.data['body'])
+
+
+class TestNumberPredictor(unittest.TestCase):
+    """
+    NumberPredictor orders GitHub issues so they are created to match Trac ID,
+    as much as possible.
+    """
+    def setUp(self):
+        """
+        Initialize the NumberPredictor, and the `next_numbers` cache.
+        """
+
+        self.sut = tm.NumberPredictor()
+
+        # Break the cache of next_numbers to prevent accidental get requests.
+        self.sut.next_numbers = {
+            'server': 'not-a-number',
+            'client': 'not-a-number',
+            'commons': 'not-a-number',
+            'trac-migration-staging': 'not-a-number',
+            }
+
+    def test_requestNextNumber_cached(self):
+        """
+        When the `next_numbers` cache has an entry for the repository,
+        it returns the value of the entry.
+        """
+        self.sut.next_numbers['trac-migration-staging'] = 1234
+
+        self.assertEqual(
+            1234, self.sut.requestNextNumber('trac-migration-staging'))
+
+    def generateTickets(self, numbers):
+        """
+        Create a list of tickets with given IDs.
+        """
+        return [
+            {'t_id': number, 'component': 'trac-migration-staging'}
+            for number in numbers
+            ]
+
+    def test_orderTickets_simple(self):
+        """
+        Return the tickets to submit in the same order,
+        if the next GitHub number is 1.
+        """
+        tickets = self.generateTickets([1, 2, 3])
+        self.sut.next_numbers['trac-migration-staging'] = 1
+
+        self.assertEqual(tickets, self.sut.orderTickets(tickets))
+
+    def test_orderTickets_skip(self):
+        """
+        Skip the tickets with a Trac ID lower than the next GitHub number,
+        and start with the first ticket matching Trac ID and GitHub number.
+        After the matching tickets are enumerated, continue with the others.
+        """
+        self.sut.next_numbers['trac-migration-staging'] = 4
+        tickets = self.generateTickets([1, 2, 3, 4, 5, 6])
+
+        self.assertEqual(
+            self.generateTickets([4, 5, 6, 1, 2, 3]),
+            self.sut.orderTickets(tickets)
+            )
+
+    def test_orderTickets_unfillable_gap(self):
+        """
+        When the minimum Trac ID is greater than the next GitHub number,
+        and the gap can't be filled with newer Trac IDs,
+        still return all the tickets.
+        """
+        self.sut.next_numbers['trac-migration-staging'] = 4
+        tickets = self.generateTickets([15, 16, 17])
+
+        self.assertEqual(
+            self.generateTickets([17, 16, 15]),
+            self.sut.orderTickets(tickets)
+            )
+
+    def test_orderTickets_gap_fillable_with_new(self):
+        """
+        When the minimum Trac ID is greater than the next GitHub number,
+        the highest Trac IDs are sacrificed until they fill the gap,
+        and after the gap is filled, the Trac IDs match.
+        """
+        self.sut.next_numbers['trac-migration-staging'] = 4
+        tickets = self.generateTickets([5, 6, 7])
+
+        self.assertEqual(
+            self.generateTickets([7, 5, 6]),
+            self.sut.orderTickets(tickets)
+            )
+
+    def test_orderTickets_gap_fillable_with_old(self):
+        """
+        When the minimum Trac ID is lower than the next GitHub number,
+        fill any gaps with Trac IDs already taken by other GH numbers,
+        In the example, Trac IDs 8 and 10 will match the GitHub IDs.
+        """
+        self.sut.next_numbers['trac-migration-staging'] = 7
+        tickets = self.generateTickets([2, 4, 6, 8, 10])
+
+        self.assertEqual(
+            self.generateTickets([2, 8, 4, 10, 6]),
+            self.sut.orderTickets(tickets)
+            )
 
 
 if __name__ == '__main__':

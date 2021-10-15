@@ -181,7 +181,7 @@ def _trac_ticket_links(text: str):
             ticket_re,
             f'`Trac #{ticket} <{TRAC_TICKET_PREFIX}{ticket}>`_',
             text
-        )
+            )
     return text
 
 
