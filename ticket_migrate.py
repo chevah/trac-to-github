@@ -8,7 +8,16 @@ from time import sleep
 from typing import Union
 
 import config
-from wiki_trac_rst_convert import convert_issue_content
+from trac2down import convert
+
+
+def convert_issue_content(text):
+    """
+    Convert TracWiki text to GitHub Markdown.
+    Ignore included images.
+    """
+    return convert(text, '')
+
 
 # Set to False to perform actual GitHub issue creation.
 DRY_RUN = True

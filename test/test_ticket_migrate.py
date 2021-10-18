@@ -180,8 +180,7 @@ class TestParseBody(unittest.TestCase):
         Headings are converted.
         """
         self.assertEqual(
-            "Some Top Heading\n"
-            "================\n"
+            "# Some Top Heading\n"
             "\n"
             "Content ```here```",
 

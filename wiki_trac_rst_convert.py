@@ -70,19 +70,6 @@ def convert_content(text: str):
     return text
 
 
-def convert_issue_content(text: str):
-    """
-    Convert the description of a Trac issue to GitHub Markdown.
-    """
-    text = _tracwiki_to_md_links(text)
-    text = _tracwiki_heading_to_rst_heading(text)
-    text = _tracwiki_subheading_to_rst_subheading(text)
-    text = _tracwiki_list_dedent(text)
-    text = _tracwiki_list_separate_from_paragraph(text)
-
-    return text
-
-
 def _remove_pageoutline(text: str):
     """
     Remove any TracWiki PageOutline directives
@@ -143,20 +130,6 @@ def _tracwiki_to_rst_links(text: str):
 
     for url, link_text in _matches(link_re, text):
         text = _sub(link_re, f'`{link_text} <{url}>`_', text)
-
-    return text
-
-
-def _tracwiki_to_md_links(text):
-    """
-    Takes TracWiki markup and converts its links to RST links.
-    """
-    url = '[a-z]+://[^ ]+'
-    link_text = '[^]]+'
-    link_re = rf'\[({url}) ({link_text})]'
-
-    for url, link_text in _matches(link_re, text):
-        text = _sub(link_re, f'[{link_text}]({url})', text)
 
     return text
 
