@@ -59,18 +59,22 @@ def convert_content(text: str):
     text = text.strip() + '\n'
     text = _ensure_rst_content_directive(text)
     text = _trac_to_github_wiki_links(text)
-    text = convert_issue_content(text)
+    text = _tracwiki_to_rst_links(text)
+    text = _tracwiki_wiki_link_with_text_to_github_links(text)
+    text = _trac_ticket_links(text)
+    text = _tracwiki_heading_to_rst_heading(text)
+    text = _tracwiki_subheading_to_rst_subheading(text)
+    text = _tracwiki_list_dedent(text)
+    text = _tracwiki_list_separate_from_paragraph(text)
 
     return text
 
 
 def convert_issue_content(text: str):
     """
-    Convert the description of a Trac issue to GitHub RST.
+    Convert the description of a Trac issue to GitHub Markdown.
     """
-    text = _tracwiki_to_rst_links(text)
-    text = _tracwiki_wiki_link_with_text_to_github_links(text)
-    text = _trac_ticket_links(text)
+    text = _tracwiki_to_md_links(text)
     text = _tracwiki_heading_to_rst_heading(text)
     text = _tracwiki_subheading_to_rst_subheading(text)
     text = _tracwiki_list_dedent(text)
@@ -102,7 +106,7 @@ def _ensure_rst_content_directive(text: str):
         '.. contents::\n'
         '\n' +
         text
-    )
+        )
 
 
 def _trac_to_github_wiki_links(text: str):
@@ -119,7 +123,7 @@ def _trac_to_github_wiki_links(text: str):
         # TracWiki markup:
         r'`\[wiki:"?([^ ]+?)"?]`:trac:',
         r'\[wiki:"?([^ ]+?)"?]',
-    ]
+        ]
 
     for link_re in link_matchers:
         for title in _matches(link_re, text):
@@ -143,6 +147,20 @@ def _tracwiki_to_rst_links(text: str):
     return text
 
 
+def _tracwiki_to_md_links(text):
+    """
+    Takes TracWiki markup and converts its links to RST links.
+    """
+    url = '[a-z]+://[^ ]+'
+    link_text = '[^]]+'
+    link_re = rf'\[({url}) ({link_text})]'
+
+    for url, link_text in _matches(link_re, text):
+        text = _sub(link_re, f'[{link_text}]({url})', text)
+
+    return text
+
+
 def _tracwiki_wiki_link_with_text_to_github_links(text: str):
     """
     Takes TracWiki markup and converts its Wiki links which have
@@ -157,7 +175,7 @@ def _tracwiki_wiki_link_with_text_to_github_links(text: str):
     link_matchers = [
         rf'`\[wiki:({title}) ({link_text})]`:trac:',
         rf'\[wiki:({title}) ({link_text})]',
-    ]
+        ]
 
     for link_re in link_matchers:
         for title, link_text in _matches(link_re, text):

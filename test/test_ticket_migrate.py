@@ -226,7 +226,7 @@ class TestParseBody(unittest.TestCase):
             "Problem\n"
             "-------\n"
             "\n"
-            "The buildslaves have a builder which automatically updates the 'deps' repo on each slave.\n"
+            "Solution.\n"
             "\n",
 
             tm.parse_body(
@@ -236,8 +236,23 @@ class TestParseBody(unittest.TestCase):
                 "Problem\n"
                 "-------\n"
                 "\n"
-                "The buildslaves have a builder which automatically updates the 'deps' repo on each slave.\n"
+                "Solution.\n"
                 "}}}\n"
+                )
+            )
+
+    def test_parse_body_links(self):
+        """
+        TracWiki syntax links get converted to Markdown links.
+        """
+        self.assertEqual(
+            "In order to "
+            "[avoid third-party cookies](https://github.com/chevah/sftpplus.com/pull/254), "
+            "we need to handle the contact form ourselves.",
+            tm.parse_body(
+                "In order to "
+                "[https://github.com/chevah/sftpplus.com/pull/254 avoid third-party cookies], "
+                "we need to handle the contact form ourselves."
                 )
             )
 
