@@ -266,7 +266,7 @@ class TestTicketSelection(unittest.TestCase):
         """
         closed = [{'status': 'closed'}]
         self.assertEqual(
-            [], list(tm.select_open_tickets(closed)))
+            [], list(tm.select_tickets(closed)))
 
     def test_status_open(self):
         """
@@ -281,7 +281,7 @@ class TestTicketSelection(unittest.TestCase):
             {'status': 'needs_review'},
             ]
         self.assertEqual(
-            non_closed, list(tm.select_open_tickets(non_closed)))
+            non_closed, list(tm.select_tickets(non_closed)))
 
 
 class TestGitHubRequest(unittest.TestCase):
@@ -372,7 +372,10 @@ class TestNumberPredictor(unittest.TestCase):
         tickets = self.generateTickets([1, 2, 3])
         self.sut.next_numbers['trac-migration-staging'] = 1
 
-        self.assertEqual(tickets, self.sut.orderTickets(tickets))
+        self.assertEqual(
+            (tickets, [1, 2, 3]),
+            self.sut.orderTickets(tickets)
+            )
 
     def test_orderTickets_skip(self):
         """
@@ -384,7 +387,10 @@ class TestNumberPredictor(unittest.TestCase):
         tickets = self.generateTickets([1, 2, 3, 4, 5, 6])
 
         self.assertEqual(
-            self.generateTickets([4, 5, 6, 1, 2, 3]),
+            (
+                self.generateTickets([4, 5, 6, 1, 2, 3]),
+                [4, 5, 6, 7, 8, 9],
+                ),
             self.sut.orderTickets(tickets)
             )
 
@@ -398,7 +404,10 @@ class TestNumberPredictor(unittest.TestCase):
         tickets = self.generateTickets([15, 16, 17])
 
         self.assertEqual(
-            self.generateTickets([17, 16, 15]),
+            (
+                self.generateTickets([17, 16, 15]),
+                [4, 5, 6],
+                ),
             self.sut.orderTickets(tickets)
             )
 
@@ -412,7 +421,7 @@ class TestNumberPredictor(unittest.TestCase):
         tickets = self.generateTickets([5, 6, 7])
 
         self.assertEqual(
-            self.generateTickets([7, 5, 6]),
+            (self.generateTickets([7, 5, 6]), [4, 5, 6]),
             self.sut.orderTickets(tickets)
             )
 
@@ -426,7 +435,10 @@ class TestNumberPredictor(unittest.TestCase):
         tickets = self.generateTickets([2, 4, 6, 8, 10])
 
         self.assertEqual(
-            self.generateTickets([2, 8, 4, 10, 6]),
+            (
+                self.generateTickets([2, 8, 4, 10, 6]),
+                [7, 8, 9, 10, 11],
+                ),
             self.sut.orderTickets(tickets)
             )
 
@@ -443,7 +455,7 @@ class TestNumberPredictor(unittest.TestCase):
             {'t_id': 17, 'component': 'trac-migration-staging'},
             ]
 
-        output = self.sut.orderTickets(tickets)
+        output, expected_github = self.sut.orderTickets(tickets)
 
         commons_output = [t for t in output if t['component'] == 'commons']
         migration_output = [
@@ -462,6 +474,10 @@ class TestNumberPredictor(unittest.TestCase):
                 {'t_id': 11, 'component': 'trac-migration-staging'},
                 ],
             migration_output
+            )
+        self.assertEqual(
+            expected_github,
+            [7, 8, 17, 18]
             )
 
 

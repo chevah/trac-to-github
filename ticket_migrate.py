@@ -1,3 +1,4 @@
+#!/usr/bin/env python3
 # Migrate Trac tickets to GitHub.
 from collections import deque
 
@@ -11,16 +12,16 @@ import config
 from trac2down import convert
 
 
+# Set to False to perform actual GitHub issue creation.
+DRY_RUN = False
+
+
 def convert_issue_content(text):
     """
     Convert TracWiki text to GitHub Markdown.
     Ignore included images.
     """
     return convert(text, '')
-
-
-# Set to False to perform actual GitHub issue creation.
-DRY_RUN = True
 
 
 def get_repo(component):
@@ -204,9 +205,12 @@ class GitHubRequest:
     """
     A plain object holding all data needed for creating a GitHub issue.
     """
-    def __init__(self, owner, repo, title, body, milestone, labels, assignees):
+    def __init__(
+            self, owner, repo, trac_id,
+            title, body, milestone, labels, assignees):
         self.owner = owner
         self.repo = repo
+        self.t_id = trac_id
         self.data = {
             'title': title,
             'body': body,
@@ -215,9 +219,11 @@ class GitHubRequest:
             'assignees': assignees,
             }
 
-    def submit(self):
+    def submit(self, expected_number):
         """
         Execute the POST request to create a GitHub issue.
+
+        In case of an unexpected state, go into debug mode.
         """
         url = f'https://api.github.com/repos/{self.owner}/{self.repo}/issues'
 
@@ -242,7 +248,22 @@ class GitHubRequest:
                 import pdb
                 pdb.set_trace()
 
-            print(self.data['t_id'], response.json()['html_url'])
+            # Remember the GitHub URL assigned to each ticket.
+            with open('tickets_created.tsv', 'a') as f:
+                trac_url = config.TRAC_TICKET_PREFIX + str(self.t_id)
+                github_url = response.json()['html_url']
+                f.write(f'{trac_url}\t{github_url}\n')
+
+            if response.json()['number'] != expected_number:
+                print(f"Expected number {expected_number}, got {github_url}")
+                print(
+                    "Back up the Trac DB somewhere else, "
+                    "delete the submitted tickets from the working copy, "
+                    "and try again."
+                    )
+                import pdb
+                pdb.set_trace()
+
 
     @classmethod
     def fromTracData(
@@ -260,6 +281,7 @@ class GitHubRequest:
         return cls(
             owner=config.OWNER,
             repo=get_repo(component),
+            trac_id=kwargs['t_id'],
             title=summary,
             body=get_body(description, data=kwargs),
             milestone=None,
@@ -296,42 +318,46 @@ class NumberPredictor:
         if repo in self.next_numbers:
             return self.next_numbers[repo]
 
-        if DRY_RUN:
-            raise AssertionError(f"Would request GitHub issues for {repo}.")
-
-        issues = requests.get(
-            url=f'https://api.github.com/repos/{config.OWNER}/{repo}/issues',
-            headers={'accept': 'application/vnd.github.v3+json'},
-            auth=(config.OAUTH_USER, config.OAUTH_TOKEN),
-            params={'state': 'all'},
-            )
-        last_issue_number = issues.json()[0]['number']
-
-        pulls = requests.get(
-            url=f'https://api.github.com/repos/{config.OWNER}/{repo}/pulls',
-            headers={'accept': 'application/vnd.github.v3+json'},
-            auth=(config.OAUTH_USER, config.OAUTH_TOKEN),
-            params={'state': 'all'},
-            )
-        last_pull_number = pulls.json()[0]['number']
+        last_issue_number = self._requestMaxNumber(repo, 'issues')
+        last_pull_number = self._requestMaxNumber(repo, 'pulls')
 
         next_number = max(last_issue_number, last_pull_number) + 1
         print(f"Next issue for {repo} will be {next_number}.")
 
         return next_number
 
+    def _requestMaxNumber(self, repo, kind):
+        """
+        Get the largest GitHub number, for either tickets or pulls.
+        `kind` is either "issues" or "pulls".
+        Fortunately GitHub orders them newest first.
+        """
+        tickets_or_pulls = requests.get(
+            url=f'https://api.github.com/repos/{config.OWNER}/{repo}/{kind}',
+            headers={'accept': 'application/vnd.github.v3+json'},
+            auth=(config.OAUTH_USER, config.OAUTH_TOKEN),
+            params={'state': 'all'},
+            )
+        try:
+            last_number = tickets_or_pulls.json()[0]['number']
+        except IndexError:
+            last_number = 0
+
+        return last_number
+
     def orderTickets(self, tickets):
         """
         Choose an order to create tickets on GitHub so that we maximize
         matches of GitHub IDs with Trac IDs.
 
-        Assumes Trac IDs are unique.
+        Return the ticket objects in order, and their expected GitHub numbers.
         """
         repositories = (
             list(config.REPOSITORY_MAPPING.values()) +
             [config.FALLBACK_REPOSITORY]
             )
         all_repo_ordered_tickets = []
+        expected_github_numbers = []
 
         for repo in set(repositories):
             self.next_numbers[repo] = self.requestNextNumber(repo)
@@ -372,10 +398,15 @@ class NumberPredictor:
             # And add to the all-repo list.
             all_repo_ordered_tickets.extend(ordered_tickets)
 
-        return all_repo_ordered_tickets
+            # Compute GitHub numbers.
+            github_end = start + len(ordered_tickets)
+            expected_github_numbers.extend(range(start, github_end))
+
+        assert len(all_repo_ordered_tickets) == len(expected_github_numbers)
+        return all_repo_ordered_tickets, expected_github_numbers
 
 
-def select_open_tickets(tickets):
+def select_tickets(tickets):
     """
     Choose only tickets which don't have a closed status.
     """
@@ -445,13 +476,14 @@ def main():
     """
     Read the Trac DB and post the open tickets to GitHub.
     """
-    tickets = list(select_open_tickets(read_trac_tickets()))
-
+    tickets = list(select_tickets(read_trac_tickets()))
     np = NumberPredictor()
-    tickets = np.orderTickets(tickets)
+    tickets, expected_numbers = np.orderTickets(tickets)
 
-    for issue in GitHubRequest.fromTracDataMultiple(tickets):
-        issue.submit()
+    for issue, expected_number in zip(
+            GitHubRequest.fromTracDataMultiple(tickets), expected_numbers
+            ):
+        issue.submit(expected_number)
 
 
 if __name__ == '__main__':
