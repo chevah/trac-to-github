@@ -48,7 +48,25 @@ def read_trac_tickets():
         sys.exit(1)
 
     db = sqlite3.connect(sys.argv[1])
-    for row in db.execute('SELECT * FROM ticket ORDER BY id'):
+
+    # Only take the last branch change.
+    # For example, https://trac.chevah.com/ticket/85 has multiple changes,
+    # and the last one is to GH PR 238.
+    # We use GROUP BY because SQLite has no DISTINCT ON.
+    # https://www.sqlite.org/quirks.html#aggregate_queries_can_contain_non_aggregate_result_columns_that_are_not_in_the_group_by_clause
+    for row in db.execute(
+            """\
+            SELECT *
+            FROM
+              (SELECT *
+               FROM ticket
+               LEFT JOIN ticket_change ON ticket.id = ticket_change.ticket
+               AND ticket_change.field = 'branch'
+               AND ticket_change.newvalue LIKE '%github%'
+               ORDER BY ticket.id,
+                        ticket_change.time DESC)
+            GROUP BY id;
+            """):
         (
             t_id,
             t_type,
@@ -66,7 +84,13 @@ def read_trac_tickets():
             resolution,
             summary,
             description,
-            keywords
+            keywords,
+            _ticket,
+            _time,
+            _author,
+            _field,
+            _oldvalue,
+            _newvalue,
             ) = row
 
         yield {
@@ -87,6 +111,7 @@ def read_trac_tickets():
             'summary': summary,
             'description': description,
             'keywords': keywords,
+            'branch': _newvalue,
             }
 
 
@@ -135,7 +160,7 @@ class NumberPredictor:
         except IndexError:
             last_number = 0
         except KeyError:
-            print(f"Failed to get tickets from {config.OWNER}/{repo}.")
+            raise KeyError(f"Couldn't get tickets from {config.OWNER}/{repo}.")
 
         return last_number
 
@@ -356,10 +381,15 @@ def get_body(description, data):
     if data['changetime'] != data['time']:
         changed_message = f"Last changed on {showtime(data['changetime'])}.\n"
 
+    pr_message = ''
+    if data['branch']:
+        pr_message = f"PR at {data['branch']}.\n"
+
     body = (
         f"T{data['t_id']} {data['t_type']} was created by {reporter}"
         f" on {showtime(data['time'])}.\n"
         f"{changed_message}"
+        f"{pr_message}"
         "\n"
         f"{parse_body(description)}"
         )

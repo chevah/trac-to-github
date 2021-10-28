@@ -130,6 +130,7 @@ class TestBody(unittest.TestCase):
                     'reporter': 'adi',
                     'time': 1234,
                     'changetime': 1234,
+                    'branch': None,
                     }
                 )
             )
@@ -151,6 +152,7 @@ class TestBody(unittest.TestCase):
                     'reporter': 'someone_else',
                     'time': 1234,
                     'changetime': 1234,
+                    'branch': ''
                     }
                 )
             )
@@ -322,6 +324,7 @@ class TestGitHubRequest(unittest.TestCase):
             't_type': 'task',
             'time': 1288883091000000,
             'changetime': 1360238496689890,
+            'branch': 'https://github.com/chevah/agent-1.5/pull/10'
             }])
 
         requests = list(request_gen)
@@ -339,6 +342,7 @@ class TestGitHubRequest(unittest.TestCase):
         self.assertEqual(
             'T6 task was created by adiroiban on 2010-11-04 15:04:51Z.\n'
             'Last changed on 2013-02-07 12:01:36Z.\n'
+            'PR at https://github.com/chevah/agent-1.5/pull/10.\n'
             '\n'
             'description',
             request.data['body'])
