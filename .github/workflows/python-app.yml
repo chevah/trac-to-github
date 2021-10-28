@@ -27,9 +27,6 @@ jobs:
       - name: Lint with flake8
         run: |
           flake8
-      - name: Prepare config
-        run: |
-          cp config.py.sample config.py
       - name: Test with pytest
         run: |
           pytest

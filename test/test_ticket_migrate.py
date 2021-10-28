@@ -1,6 +1,10 @@
 import unittest
 
+import config_test
 import ticket_migrate as tm
+
+# Monkeypatch the SUT to use the test config.
+tm.config = config_test
 
 
 class TestRepositoryMapping(unittest.TestCase):
