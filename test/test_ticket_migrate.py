@@ -302,15 +302,15 @@ class TestTicketSelection(unittest.TestCase):
 
 class TestGitHubRequest(unittest.TestCase):
     """
-    `GitHubRequest` objects are created from Trac data.
+    `GitHubIssue` objects are created from Trac data.
     """
     def test_fromTracDataMultiple(self):
         """
         A list of one dictionary with Trac ticket data results in
-        one GitHubRequest object with the proper fields.
+        one GitHubIssue object with the proper fields.
         """
 
-        request_gen = tm.GitHubRequest.fromTracDataMultiple([{
+        request_gen = tm.GitHubIssue.fromTracDataMultiple([{
             'component': 'trac-migration-staging',
             'owner': 'danuker',
             'summary': 'summary',

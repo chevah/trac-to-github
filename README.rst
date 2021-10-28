@@ -53,29 +53,3 @@ Things that are not yet auto-converted:
 3. Run `./ticket_migrate.py ../trac.db`, where `../trac.db` is the path
    to the Trac SQLite DB dump.
 
-### Manual debugging
-
-For custom ticket testing try the following patch.
-Do NOT run this on production repos.
-To apply it: `git apply -`, paste the code, and Ctrl+D to signal EOF.
-
-```
-diff --git a/ticket_migrate.py b/ticket_migrate.py
-index d1d48fb..3f773b0 100755
---- a/ticket_migrate.py
-+++ b/ticket_migrate.py
-@@ -476,9 +476,11 @@ def main():
-     """
-     Read the Trac DB and post the open tickets to GitHub.
-     """
--    tickets = list(select_tickets(read_trac_tickets()))
-+    tickets = read_trac_tickets()
-+    tickets = [t for t in tickets if t['t_id'] in [17, 18, 19]]
-     np = NumberPredictor()
-     tickets, expected_numbers = np.orderTickets(tickets)
-+    import pdb; pdb.set_trace()
-+    return
-
-     for issue, expected_number in zip(
-             GitHubRequest.fromTracDataMultiple(tickets), expected_numbers
-```
