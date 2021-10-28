@@ -1,19 +1,19 @@
 #!/usr/bin/env python3
 # Migrate Trac tickets to GitHub.
-from collections import deque
-
-import requests
+import datetime
 import sqlite3
 import sys
+from collections import deque
 from time import sleep
 from typing import Union
+
+import requests
 
 import config
 from trac2down import convert
 
-
 # Set to False to perform actual GitHub issue creation.
-DRY_RUN = False
+DRY_RUN = True
 
 
 def convert_issue_content(text):
@@ -71,7 +71,7 @@ def labels_from_keywords(keywords: Union[str, None]):
         }
     typo_fixes = {'tech-dept': 'tech-debt', 'tech-deb': 'tech-debt'}
 
-    keywords = [typo_fixes.get(kw, kw) for kw in keywords]
+    keywords = [typo_fixes.get(kw, kw) for kw in keywords if kw]
     discarded = [kw for kw in keywords if kw not in allowed_keyword_labels]
 
     if discarded:
@@ -186,19 +186,39 @@ def parse_body(description):
 
 
 def get_body(description, data):
+    """
+    Generate the ticket description body for GitHub.
+    """
     reporters = get_assignees(data['reporter'])
     if reporters:
         reporter = reporters[0]
     else:
         reporter = data['reporter']
 
+    changed_message = ''
+    if data['changetime'] != data['time']:
+        changed_message = f"Last changed on {showtime(data['changetime'])}.\n"
+
     body = (
-        f"T{data['t_id']} {data['t_type']} was created by {reporter}.\n"
+        f"T{data['t_id']} {data['t_type']} was created by {reporter}"
+        f" on {showtime(data['time'])}.\n"
+        f"{changed_message}"
         "\n"
         f"{parse_body(description)}"
         )
 
     return body
+
+
+def showtime(unix_usec):
+    """
+    Convert a Trac timestamp to a human-readable date and time.
+
+    Trac stores timestamps as microseconds since Epoch.
+    """
+    timestamp = unix_usec // 1_000_000
+    dt = datetime.datetime.utcfromtimestamp(timestamp)
+    return f"{dt.isoformat(sep=' ')}Z"
 
 
 class GitHubRequest:
@@ -229,40 +249,41 @@ class GitHubRequest:
 
         if DRY_RUN:
             print(f"Would post to {url}:\n{self.data}")
-        else:
-            # Avoid crossing the rate limit (5000/hr).
-            sleep(1)
+            return
 
-            response = requests.post(
-                url=url,
-                headers={'accept': 'application/vnd.github.v3+json'},
-                json=self.data,
-                auth=(config.OAUTH_USER, config.OAUTH_TOKEN)
+        # Avoid crossing the rate limit (5000/hr).
+        sleep(1)
+
+        response = requests.post(
+            url=url,
+            headers={'accept': 'application/vnd.github.v3+json'},
+            json=self.data,
+            auth=(config.OAUTH_USER, config.OAUTH_TOKEN)
+            )
+
+        if response.status_code != 201:
+            print('Error: Issue not created!')
+            print(response.status_code, response.reason)
+            print(response.text)
+            print(response.headers)
+            import pdb
+            pdb.set_trace()
+
+        # Remember the GitHub URL assigned to each ticket.
+        with open('tickets_created.tsv', 'a') as f:
+            trac_url = config.TRAC_TICKET_PREFIX + str(self.t_id)
+            github_url = response.json()['html_url']
+            f.write(f'{trac_url}\t{github_url}\n')
+
+        if response.json()['number'] != expected_number:
+            print(f"Expected number {expected_number}, got {github_url}")
+            print(
+                "Back up the Trac DB somewhere else, "
+                "delete the submitted tickets from the working copy, "
+                "and try again."
                 )
-
-            if response.status_code != 201:
-                print('Error: Issue not created!')
-                print(response.status_code, response.reason)
-                print(response.text)
-                print(response.headers)
-                import pdb
-                pdb.set_trace()
-
-            # Remember the GitHub URL assigned to each ticket.
-            with open('tickets_created.tsv', 'a') as f:
-                trac_url = config.TRAC_TICKET_PREFIX + str(self.t_id)
-                github_url = response.json()['html_url']
-                f.write(f'{trac_url}\t{github_url}\n')
-
-            if response.json()['number'] != expected_number:
-                print(f"Expected number {expected_number}, got {github_url}")
-                print(
-                    "Back up the Trac DB somewhere else, "
-                    "delete the submitted tickets from the working copy, "
-                    "and try again."
-                    )
-                import pdb
-                pdb.set_trace()
+            import pdb
+            pdb.set_trace()
 
 
     @classmethod
@@ -296,6 +317,20 @@ class GitHubRequest:
         """
         for ticket in trac_data:
             yield cls.fromTracData(**ticket)
+
+
+def unique(elements):
+    """
+    Discard duplicate items, while preserving order.
+    """
+    seen = set()
+    unique = []
+    for e in elements:
+        if e not in seen:
+            seen.add(e)
+            unique.append(e)
+
+    return unique
 
 
 class NumberPredictor:
@@ -342,6 +377,8 @@ class NumberPredictor:
             last_number = tickets_or_pulls.json()[0]['number']
         except IndexError:
             last_number = 0
+        except KeyError:
+            print(f"Failed to get tickets from {config.OWNER}/{repo}.")
 
         return last_number
 
@@ -353,13 +390,14 @@ class NumberPredictor:
         Return the ticket objects in order, and their expected GitHub numbers.
         """
         repositories = (
-            list(config.REPOSITORY_MAPPING.values()) +
+            [config.REPOSITORY_MAPPING[k] for k in config.REPOSITORY_MAPPING] +
             [config.FALLBACK_REPOSITORY]
             )
         all_repo_ordered_tickets = []
         expected_github_numbers = []
 
-        for repo in set(repositories):
+        for repo in unique(repositories):
+            print('processing repo', repo)
             self.next_numbers[repo] = self.requestNextNumber(repo)
 
             tickets_by_id = {
@@ -472,6 +510,20 @@ def read_trac_tickets():
             }
 
 
+def print_stats(tickets, expected_numbers):
+    """
+    Show how many tickets will preserve their Trac ID.
+    """
+    zipped = zip(tickets, expected_numbers)
+    matches = sum(1 for t, e in zipped if t['t_id'] == e)
+    zipped_open = [(t, e) for t, e in zip(tickets, expected_numbers) if
+                   t['status'] != 'closed']
+    matches_open = sum(1 for t, e in zipped_open if t['t_id'] == e)
+    print('Expected GitHub numbers to equal Trac ID:')
+    print(f'{matches} out of {len(tickets)}')
+    print(f'{matches_open} out of {len(zipped_open)} open tickets')
+
+
 def main():
     """
     Read the Trac DB and post the open tickets to GitHub.
@@ -479,6 +531,8 @@ def main():
     tickets = list(select_tickets(read_trac_tickets()))
     np = NumberPredictor()
     tickets, expected_numbers = np.orderTickets(tickets)
+
+    print_stats(tickets, expected_numbers)
 
     for issue, expected_number in zip(
             GitHubRequest.fromTracDataMultiple(tickets), expected_numbers

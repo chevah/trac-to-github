@@ -114,13 +114,19 @@ class TestBody(unittest.TestCase):
         Writes Trac ticket details at the beginning of the description.
         """
         self.assertEqual(
-            "T12345 bug was created by adiroiban.\n"
+            "T12345 bug was created by adiroiban on 1970-01-01 00:00:00Z.\n"
             "\n"
             "The ticket description.",
 
             tm.get_body(
                 "The ticket description.",
-                {'t_id': '12345', 't_type': 'bug', 'reporter': 'adi'}
+                {
+                    't_id': 12345,
+                    't_type': 'bug',
+                    'reporter': 'adi',
+                    'time': 1234,
+                    'changetime': 1234,
+                    }
                 )
             )
 
@@ -129,13 +135,19 @@ class TestBody(unittest.TestCase):
         Parses monospace squiggly brackets.
         """
         self.assertEqual(
-            "T5432 task was created by someone_else.\n"
+            "T5432 task was created by someone_else on 1970-01-01 00:00:00Z.\n"
             "\n"
             "The ticket ```description```.",
 
             tm.get_body(
                 "The ticket {{{description}}}.",
-                {'t_id': '5432', 't_type': 'task', 'reporter': 'someone_else'}
+                {
+                    't_id': 5432,
+                    't_type': 'task',
+                    'reporter': 'someone_else',
+                    'time': 1234,
+                    'changetime': 1234,
+                    }
                 )
             )
 
@@ -302,8 +314,10 @@ class TestGitHubRequest(unittest.TestCase):
             'priority': 'high',
             'keywords': 'feature, easy',
             'reporter': 'adi',
-            't_id': 321,
+            't_id': 6,
             't_type': 'task',
+            'time': 1288883091000000,
+            'changetime': 1360238496689890,
             }])
 
         requests = list(request_gen)
@@ -319,7 +333,8 @@ class TestGitHubRequest(unittest.TestCase):
         self.assertEqual(['danuker'], request.data['assignees'])
         self.assertEqual('summary', request.data['title'])
         self.assertEqual(
-            'T321 task was created by adiroiban.\n'
+            'T6 task was created by adiroiban on 2010-11-04 15:04:51Z.\n'
+            'Last changed on 2013-02-07 12:01:36Z.\n'
             '\n'
             'description',
             request.data['body'])
