@@ -21,33 +21,42 @@ def main():
     Read the Trac DB and post the open tickets to GitHub.
     """
     tickets = list(select_tickets(read_trac_tickets()))
+    comments = list(read_trac_comments())
     np = NumberPredictor()
     tickets, expected_numbers = np.orderTickets(tickets)
 
-    print_stats(tickets, expected_numbers)
+    # Parse tickets into GitHub issue objects.
+    issues = list(GitHubRequest.fromTracDataMultiple(tickets))
 
-    for issue, expected_number in zip(
-            GitHubIssue.fromTracDataMultiple(tickets), expected_numbers
-            ):
+    output_stats(issues, expected_numbers)
+
+    print("Issues parsed. Starting to submit them.\n"
+          "Please don't manually open issues or PRs until this is done.")
+
+    for issue, expected_number in zip(issues, expected_numbers):
         issue.submit(expected_number)
+
+    print("Issue creation complete. "
+          "You may now manually open issues and PRs.\n"
+          "Continuing with comments and closing the closed tickets.")
+    for issue in issues:
+        issue.closeIfNeeded()
+        issue.submitMyComments(comments)
 
 
 def select_tickets(tickets):
     """
     Choose only tickets which don't have a closed status.
     """
-    return [t for t in tickets if t['status'] != 'closed']
+    return [t for t in tickets if t['t_id'] == 5519]
+    # return [t for t in tickets if t['status'] != 'closed']
 
 
 def read_trac_tickets():
     """
-    Read the Trac ticket data, and generate dicts.
+    Read the Trac ticket data from the database, and generate dicts.
     """
-    if len(sys.argv) != 2:
-        print("Need to pass the path to Trac DB as argument.")
-        sys.exit(1)
-
-    db = sqlite3.connect(sys.argv[1])
+    db = get_db()
 
     # Only take the last branch change.
     # For example, https://trac.chevah.com/ticket/85 has multiple changes,
@@ -115,13 +124,49 @@ def read_trac_tickets():
             }
 
 
+def read_trac_comments():
+    """
+    Read the Trac comment data from the database.
+
+    The last version is in the `newvalue` of the `comment` field.
+
+    Example changed comment: https://trac.chevah.com/ticket/3928#comment:1
+    """
+    db = get_db()
+    for row in db.execute(
+            "SELECT * FROM ticket_change where field = 'comment';"):
+        t_id, c_time, author, field, oldvalue, newvalue = row
+
+        # Only return comments with actual truthy text.
+        if newvalue:
+            yield {
+                't_id': t_id,
+                'c_time': c_time,
+                'author': author,
+                'field': field,
+                'oldvalue': oldvalue,
+                'newvalue': newvalue,
+                }
+
+
+def get_db():
+    """
+    Return a database connection.
+    """
+    if len(sys.argv) != 2:
+        print("Need to pass the path to Trac DB as argument.")
+        sys.exit(1)
+    db = sqlite3.connect(sys.argv[1])
+    return db
+
+
 class NumberPredictor:
     """
     A best-effort algorithm to preserve issue IDs (named "numbers" in the API).
     """
     def __init__(self):
         """
-        Store an index of next issue/PR numbers per repository.
+        Store a cache of repository -> next issue numbers.
         """
         self.next_numbers = {}
 
@@ -143,7 +188,8 @@ class NumberPredictor:
 
         return next_number
 
-    def _requestMaxNumber(self, repo, kind):
+    @staticmethod
+    def _requestMaxNumber(repo, kind):
         """
         Get the largest GitHub number, for either tickets or pulls.
         `kind` is either "issues" or "pulls".
@@ -256,30 +302,39 @@ def get_repo(component):
     return config.REPOSITORY_MAPPING.get(component, config.FALLBACK_REPOSITORY)
 
 
-def print_stats(tickets, expected_numbers):
+def output_stats(tickets, expected_numbers):
     """
     Show how many tickets will preserve their Trac ID.
+
+    Generate a file with the expected GitHub numbers.
     """
     zipped = zip(tickets, expected_numbers)
+    with open('tickets_expected.tsv', 'w') as f:
+        f.write('Trac link\tExpected GitHub link\n')
+        for t, e in zipped:
+            f.write(f"{t.trac_url()}\t{e}")
+
     matches = sum(1 for t, e in zipped if t['t_id'] == e)
-    zipped_open = [(t, e) for t, e in zip(tickets, expected_numbers) if
+    zipped_open = [(t, e) for t, e in zipped if
                    t['status'] != 'closed']
     matches_open = sum(1 for t, e in zipped_open if t['t_id'] == e)
     print('Expected GitHub numbers to equal Trac ID:')
-    print(f'{matches} out of {len(tickets)}')
-    print(f'{matches_open} out of {len(zipped_open)} open tickets')
+    print(f'\t{matches} out of {len(tickets)}')
+    print(f'\t{matches_open} out of {len(zipped_open)} open tickets\n')
 
 
-class GitHubIssue:
+class GitHubRequest:
     """
-    A plain object holding all data needed for creating a GitHub issue.
+    Transform Trac tickets, comments, and their metadata to GitHub format,
+    and allow submitting that format.
     """
     def __init__(
             self, owner, repo, trac_id,
-            title, body, milestone, labels, assignees):
+            title, body, closed, milestone, labels, assignees):
         self.owner = owner
         self.repo = repo
         self.t_id = trac_id
+        self.closed = closed
         self.data = {
             'title': title,
             'body': body,
@@ -288,16 +343,23 @@ class GitHubIssue:
             'assignees': assignees,
             }
 
+        # We get the issue number after submitting.
+        self.github_number = None
+
     def submit(self, expected_number):
         """
         Execute the POST request to create a GitHub issue.
 
         In case of an unexpected state, go into debug mode.
+
+        API Docs:
+        https://docs.github.com/en/rest/reference/issues#create-an-issue
         """
         url = f'https://api.github.com/repos/{self.owner}/{self.repo}/issues'
 
         if DRY_RUN:
             print(f"Would post to {url}:\n{self.data}")
+            self.github_number = expected_number
             return
 
         # Avoid crossing the rate limit (5000/hr).
@@ -320,19 +382,38 @@ class GitHubIssue:
 
         # Remember the GitHub URL assigned to each ticket.
         with open('tickets_created.tsv', 'a') as f:
-            trac_url = config.TRAC_TICKET_PREFIX + str(self.t_id)
             github_url = response.json()['html_url']
-            f.write(f'{trac_url}\t{github_url}\n')
+            f.write(f'{self.trac_url()}\t{github_url}\n')
 
         if response.json()['number'] != expected_number:
             print(f"Expected number {expected_number}, got {github_url}")
             print(
-                "Back up the Trac DB somewhere else, "
-                "delete the submitted tickets from the working copy, "
-                "and try again."
+                "Back up the Trac DB, "
+                "delete the submitted tickets from the currently used copy, "
+                "and try again.\n"
+                "Also, the comments of this ticket will not be posted.\n"
+                "Close the debugger after you found the problem."
                 )
             import pdb
             pdb.set_trace()
+
+        self.github_number = expected_number
+
+    def trac_url(self):
+        """
+        Return this issue's Trac URL.
+        """
+        return config.TRAC_TICKET_PREFIX + str(self.t_id)
+
+    def submitMyComments(self, comments):
+        """
+        Look through `comments`, and submit the ones about this ticket.
+
+        API Docs:
+        https://docs.github.com/en/rest/reference/issues#create-an-issue-comment
+        """
+        for comment in (c for c in comments if c['t_id'] == self.t_id):
+            self._submitComment(self.commentFromTracData(comment))
 
     @classmethod
     def fromTracData(
@@ -345,7 +426,7 @@ class GitHubIssue:
             keywords,
             **kwargs):
         """
-        Create a GitHubIssue from Trac ticket data fields.
+        Create a GitHubRequest from Trac ticket data fields.
         """
         return cls(
             owner=config.OWNER,
@@ -353,8 +434,15 @@ class GitHubIssue:
             trac_id=kwargs['t_id'],
             title=summary,
             body=get_body(description, data=kwargs),
+            closed=kwargs['status'] == 'closed',
             milestone=None,
-            labels=get_labels(component, priority, keywords),
+            labels=get_labels(
+                component,
+                priority,
+                keywords,
+                kwargs['status'],
+                kwargs['resolution']
+                ),
             assignees=get_assignees(owner),
             )
 
@@ -365,6 +453,101 @@ class GitHubIssue:
         """
         for ticket in trac_data:
             yield cls.fromTracData(**ticket)
+
+    @staticmethod
+    def commentFromTracData(trac_data):
+        """
+        Convert Trac comment data to GitHub comment body as JSON.
+        """
+        author, _ = config.USER_MAPPING.get(
+            trac_data['author'],
+            (trac_data['author'], 'ignored-email-field')
+            )
+
+        body = (
+            f"Comment by {author} at {showtime(trac_data['c_time'])}.\n"
+            f"\n"
+            f"{parse_body(trac_data['newvalue'])}"
+            )
+
+        return {'body': body}
+
+    def _submitComment(self, comment_data):
+        """
+        Send a POST request to GitHub creating the comment from `comment_data`.
+        """
+        url = f'https://api.github.com/repos/' \
+              f'{self.owner}/{self.repo}/issues/{self.github_number}/comments'
+
+        if DRY_RUN:
+            print(f"Would post to {url}:\n{comment_data}")
+            return
+
+        if not self.github_number:
+            print(f"Trac ticket {self.t_id} did not receive a GitHub number.")
+            import pdb
+            pdb.set_trace()
+
+        # Avoid crossing the rate limit (5000/hr).
+        sleep(1)
+
+        response = requests.post(
+            url=url,
+            headers={'accept': 'application/vnd.github.v3+json'},
+            json=comment_data,
+            auth=(config.OAUTH_USER, config.OAUTH_TOKEN)
+            )
+
+        if response.status_code != 201:
+            print('Error: Comment not created!')
+            print(response.status_code, response.reason)
+            print(response.text)
+            print(response.headers)
+            import pdb
+            pdb.set_trace()
+
+        # Remember the GitHub URL assigned to each ticket.
+        with open('comments_created.tsv', 'a') as f:
+            github_url = response.json()['html_url']
+            f.write(f'{self.trac_url()}\t{github_url}\n')
+
+    def closeIfNeeded(self):
+        """
+        If the ticket status is closed,
+        send a PATCH request to GitHub to close it.
+        Unfortunately we can't directly create it as closed.
+
+        API docs:
+        https://docs.github.com/en/rest/reference/issues#update-an-issue
+        """
+        if not self.github_number:
+            print('No GitHub number assigned. Was this issue posted?')
+            import pdb
+            pdb.set_trace()
+
+        url = (
+            f'https://api.github.com/repos/{self.owner}/{self.repo}/issues/'
+            f'{self.github_number}'
+            )
+
+        if self.closed:
+            if DRY_RUN:
+                print(f"Would close issue by PATCHing: {url}")
+                return
+
+            response = requests.patch(
+                url=url,
+                headers={'accept': 'application/vnd.github.v3+json'},
+                json={'state': 'closed'},
+                auth=(config.OAUTH_USER, config.OAUTH_TOKEN)
+                )
+            if response.status_code != 200:
+                print('Error: Issue not closed!')
+                print(response.status_code, response.reason)
+                print(response.text)
+                print(response.headers)
+                import pdb
+                pdb.set_trace()
 
 
 def get_body(description, data):
@@ -397,15 +580,21 @@ def get_body(description, data):
     return body
 
 
-def get_labels(component: str, priority: Union[str, None], keywords: str):
+def get_labels(component, priority, keywords, status, resolution):
     """
-    Given the Trac component, priority, and keywords,
+    Given the Trac component, priority, keywords, and resolution,
     return the labels to apply on the GitHub issue.
     """
     priority_label = labels_from_priority(priority)
     keyword_labels = labels_from_keywords(keywords)
     component_labels = labels_from_component(component)
-    labels = {priority_label}.union(keyword_labels).union(component_labels)
+    status_labels = labels_from_status_and_resolution(status, resolution)
+    labels = (
+        {priority_label}.union(
+            keyword_labels).union(
+            component_labels).union(
+            status_labels)
+        )
     return sorted(labels)
 
 
@@ -488,6 +677,21 @@ def labels_from_priority(priority):
     if priority is None:
         return 'priority-low'
     return 'priority-{}'.format(priority.lower())
+
+
+def labels_from_status_and_resolution(status, resolution):
+    """
+    The resolution of a closed ticket is used, if there is one.
+    Otherwise, the status is used, if it is not "assigned", "new", or "closed".
+    """
+
+    if status == 'closed' and resolution:
+        return {resolution}
+
+    if status in ['in_work', 'needs_changes', 'needs_merge', 'needs_review']:
+        return {status}
+
+    return set()
 
 
 def parse_body(description):

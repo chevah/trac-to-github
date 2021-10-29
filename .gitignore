@@ -1,5 +1,9 @@
 config.py
 
+# Trac migration output
+tickets_expected.tsv
+comments_created.tsv
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]

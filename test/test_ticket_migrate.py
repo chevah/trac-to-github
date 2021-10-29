@@ -79,23 +79,38 @@ class TestLabelMapping(unittest.TestCase):
         self.assertEqual(
             ['priority-low', 'tech-debt'],
             tm.get_labels(
-                component='client', priority='Low', keywords='tech-dept'))
+                component='client',
+                priority='Low',
+                keywords='tech-dept',
+                status='',
+                resolution='',
+                ))
 
         self.assertEqual(
             ['priority-high'],
             tm.get_labels(
-                component='client', priority='High', keywords=''))
+                component='client',
+                priority='High',
+                keywords='',
+                status='',
+                resolution='',
+                ))
 
         # Handles "None" correctly.
         self.assertEqual(
             ['priority-low'],
             tm.get_labels(
-                component='client', priority=None, keywords=''))
+                component='client',
+                priority=None,
+                keywords='',
+                status=None,
+                resolution=None,
+                ))
 
     def test_get_labels_component_name(self):
         self.assertEqual(
             ['fallback', 'priority-low'],
-            tm.get_labels('fallback', 'Low', ''))
+            tm.get_labels('fallback', 'Low', '', '', ''))
 
 
 class TestAssigneeMapping(unittest.TestCase):
@@ -274,47 +289,88 @@ class TestParseBody(unittest.TestCase):
             )
 
 
-class TestTicketSelection(unittest.TestCase):
-    """
-    Selects all tickets except those with closed status.
-    """
-    def test_status_closed(self):
+class TestCommentGeneration(unittest.TestCase):
+    def test_basic(self):
         """
-        Closed tickets are filtered out.
+        Check that the body of a comment includes its author and latest text.
         """
-        closed = [{'status': 'closed'}]
-        self.assertEqual(
-            [], list(tm.select_tickets(closed)))
+        trac_data = {
+            'ticket': 3928,
+            'c_time': 1489439926524055,
+            'author': 'adi',
+            'newvalue': 'Thanks.',
+            }
+        desired_body = (
+            "Comment by adiroiban at 2017-03-13 21:18:46Z.\n"
+            "\n"
+            "Thanks."
+            )
 
-    def test_status_open(self):
-        """
-        Non-closed tickets are kept.
-        """
-        non_closed = [
-            {'status': 'new'},
-            {'status': 'assigned'},
-            {'status': 'in_work'},
-            {'status': 'needs_changes'},
-            {'status': 'needs_merge'},
-            {'status': 'needs_review'},
-            ]
         self.assertEqual(
-            non_closed, list(tm.select_tickets(non_closed)))
+            desired_body,
+            tm.GitHubRequest.commentFromTracData(trac_data)['body']
+            )
+
+    def test_no_user(self):
+        """
+        A user not defined in config.py is preserved.
+        """
+        trac_data = {
+            'ticket': 3928,
+            'c_time': 1488909819877801,
+            'author': 'andradaE',
+            'newvalue': 'Thanks.',
+            }
+        desired_body = (
+            "Comment by andradaE at 2017-03-07 18:03:39Z.\n"
+            "\n"
+            "Thanks."
+            )
+
+        self.assertEqual(
+            desired_body,
+            tm.GitHubRequest.commentFromTracData(trac_data)['body']
+            )
+
+    def test_formatting(self):
+        """
+        Check that at least some formatting works.
+        """
+        trac_data = {
+            'ticket': 3928,
+            'c_time': 1488909819877801,
+            'author': 'andradaE',
+            'newvalue': (
+                '[http://styleguide.chevah.com/tickets.html Style Guide]'
+                )
+            }
+        desired_body = (
+            "Comment by andradaE at 2017-03-07 18:03:39Z.\n"
+            "\n"
+            "[Style Guide](http://styleguide.chevah.com/tickets.html)"
+            )
+
+        self.assertEqual(
+            desired_body,
+            tm.GitHubRequest.commentFromTracData(trac_data)['body']
+            )
 
 
 class TestGitHubRequest(unittest.TestCase):
     """
-    `GitHubIssue` objects are created from Trac data.
+    `GitHubRequest` objects are created from Trac data.
     """
     def test_fromTracDataMultiple(self):
         """
         A list of one dictionary with Trac ticket data results in
-        one GitHubIssue object with the proper fields.
+        one GitHubRequest object with the proper fields.
         """
 
-        request_gen = tm.GitHubIssue.fromTracDataMultiple([{
+        request_gen = tm.GitHubRequest.fromTracDataMultiple([{
             'component': 'trac-migration-staging',
             'owner': 'danuker',
+            'status': 'closed',
+            'resolution': 'wontfix',
             'summary': 'summary',
             'description': 'description',
             'priority': 'high',
@@ -335,7 +391,7 @@ class TestGitHubRequest(unittest.TestCase):
         self.assertEqual('chevah', request.owner)
         self.assertEqual(['danuker'], request.data['assignees'])
         self.assertEqual(
-            ['easy', 'feature', 'priority-high'],
+            ['easy', 'feature', 'priority-high', 'wontfix'],
             request.data['labels'])
         self.assertEqual(['danuker'], request.data['assignees'])
         self.assertEqual('summary', request.data['title'])
@@ -378,7 +434,8 @@ class TestNumberPredictor(unittest.TestCase):
         self.assertEqual(
             1234, self.sut.requestNextNumber('trac-migration-staging'))
 
-    def generateTickets(self, numbers):
+    @staticmethod
+    def generateTickets(numbers):
         """
         Create a list of tickets with given IDs.
         """
