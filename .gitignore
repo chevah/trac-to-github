@@ -1,4 +1,7 @@
 config.py
+config-chevah.py
+*.psql
+*.db3
 
 # Trac migration output
 tickets_expected.tsv
