@@ -10,7 +10,12 @@ from typing import Union
 
 import requests
 
-import config
+try:
+    import config
+except ModuleNotFoundError:
+    # In the tests, we monkeypatch this module.
+    config = None
+
 from trac2down import convert
 
 # Set to False to perform actual GitHub issue creation.
