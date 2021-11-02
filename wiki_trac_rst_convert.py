@@ -3,7 +3,11 @@ import re
 import sys
 import os
 
-from config import TRAC_TICKET_PREFIX
+try:
+    import config
+except ModuleNotFoundError:
+    # In the tests, we monkeypatch this module.
+    config = None
 
 
 def main():
@@ -170,7 +174,7 @@ def _trac_ticket_links(text: str):
     for ticket in _matches(ticket_re, text):
         text = _sub(
             ticket_re,
-            f'`Trac #{ticket} <{TRAC_TICKET_PREFIX}{ticket}>`_',
+            f'`Trac #{ticket} <{config.TRAC_TICKET_PREFIX}{ticket}>`_',
             text
             )
     return text

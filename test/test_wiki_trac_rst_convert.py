@@ -1,6 +1,11 @@
 import unittest
 
-from wiki_trac_rst_convert import convert_content
+import config_test
+import wiki_trac_rst_convert
+
+# Monkeypatch the SUT to use the test config.
+wiki_trac_rst_convert.config = config_test
+convert_content = wiki_trac_rst_convert.convert_content
 
 
 class TracToGitHubRST(unittest.TestCase):
