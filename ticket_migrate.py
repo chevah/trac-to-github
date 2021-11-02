@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 # Migrate Trac tickets to GitHub.
 import datetime
+import pprint
 import sqlite3
 import sys
 from collections import deque
@@ -38,18 +39,26 @@ def main():
 
     print("Issue creation complete. "
           "You may now manually open issues and PRs.\n"
-          "Continuing with comments and closing the closed tickets.")
+          "Continuing with "
+          "comments, adding the issues to projects, and closing if needed.")
+
     for issue in issues:
-        issue.closeIfNeeded()
         issue.submitMyComments(comments)
+        # Submit to project before closing the issue,
+        # so the issue may auto-move to another column (such as "Done").
+        issue.submitToProject()
+        issue.closeIfNeeded()
 
 
 def select_tickets(tickets):
     """
-    Choose only tickets which don't have a closed status.
+    Easy-to-edit method to choose tickets to submit.
+    Useful in case of failure while creating tickets.
+    You can check here that the `t_id` is not in `tickets_created.tsv`.
     """
-    return [t for t in tickets if t['t_id'] == 5519]
+    # return [t for t in tickets if t['t_id'] == 5519]
     # return [t for t in tickets if t['status'] != 'closed']
+    return tickets
 
 
 def read_trac_tickets():
@@ -308,19 +317,21 @@ def output_stats(tickets, expected_numbers):
 
     Generate a file with the expected GitHub numbers.
     """
-    zipped = zip(tickets, expected_numbers)
+    zipped = list(zip(tickets, expected_numbers))
     with open('tickets_expected.tsv', 'w') as f:
-        f.write('Trac link\tExpected GitHub link\n')
+        f.write('Trac link\tExpected GitHub link\tMatch\n')
         for t, e in zipped:
-            f.write(f"{t.trac_url()}\t{e}")
+            github_link = f'https://github.com/' \
+                          f'{config.OWNER}/{t.repo}/issues/{e}'
+            match = int(t.t_id == e)
 
-    matches = sum(1 for t, e in zipped if t['t_id'] == e)
-    zipped_open = [(t, e) for t, e in zipped if
-                   t['status'] != 'closed']
-    matches_open = sum(1 for t, e in zipped_open if t['t_id'] == e)
-    print('Expected GitHub numbers to equal Trac ID:')
-    print(f'\t{matches} out of {len(tickets)}')
-    print(f'\t{matches_open} out of {len(zipped_open)} open tickets\n')
+            f.write(f"{t.trac_url()}\t{github_link}\t{match}\n")
+
+    matches = sum(1 for t, e in zipped if t.t_id == e)
+    print('Expected GitHub numbers to equal Trac ID:'
+          f'\t{matches} out of {len(tickets)}')
+    print('Check tickets_expected.tsv, and if correct, continue the debugger.')
+    import pdb; pdb.set_trace()
 
 
 class GitHubRequest:
@@ -343,8 +354,9 @@ class GitHubRequest:
             'assignees': assignees,
             }
 
-        # We get the issue number after submitting.
+        # We get the issue number and ID after submitting.
         self.github_number = None
+        self.github_id = None
 
     def submit(self, expected_number):
         """
@@ -376,7 +388,7 @@ class GitHubRequest:
             print('Error: Issue not created!')
             print(response.status_code, response.reason)
             print(response.text)
-            print(response.headers)
+            pprint.pprint(response.headers)
             import pdb
             pdb.set_trace()
 
@@ -386,7 +398,7 @@ class GitHubRequest:
             f.write(f'{self.trac_url()}\t{github_url}\n')
 
         if response.json()['number'] != expected_number:
-            print(f"Expected number {expected_number}, got {github_url}")
+            print(f"Expected number {expected_number}, got {github_url}.")
             print(
                 "Back up the Trac DB, "
                 "delete the submitted tickets from the currently used copy, "
@@ -398,6 +410,7 @@ class GitHubRequest:
             pdb.set_trace()
 
         self.github_number = expected_number
+        self.github_id = response.json()['id']
 
     def trac_url(self):
         """
@@ -414,6 +427,40 @@ class GitHubRequest:
         """
         for comment in (c for c in comments if c['t_id'] == self.t_id):
             self._submitComment(self.commentFromTracData(comment))
+
+    def submitToProject(self):
+        """
+        Add an issue identified by the GitHub global `id`
+        to the configured column ID of a project.
+
+        API docs (very bad ones):
+        https://docs.github.com/en/rest/reference/projects#create-a-project-card
+        """
+        column_id = config.COLUMN_ID
+        url = f'https://api.github.com/projects/columns/{column_id}/cards'
+        data = {
+            'content_id': self.github_id,
+            'content_type': 'Issue'
+            }
+
+        if DRY_RUN:
+            print(f"Would post to {url}:")
+            pprint.pprint(data)
+            return
+
+        response = requests.post(
+            url=url,
+            headers={'accept': 'application/vnd.github.v3+json'},
+            json=data,
+            auth=(config.OAUTH_USER, config.OAUTH_TOKEN)
+            )
+
+        if response.status_code != 201:
+            print('Error: Issue not added to project column!')
+            print(response)
+            pprint.pprint(response.json())
+            import pdb
+            pdb.set_trace()
 
     @classmethod
     def fromTracData(
