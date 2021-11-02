@@ -20,7 +20,6 @@ import codecs
 from pprint import pprint
 from sys import exit
 
-import six
 
 def convert(text, base_path, multilines=False, note_map={}, attachments_path=None, svn2git_revisions={}):
     text = re.sub('\r\n', '\n', text)
