@@ -66,8 +66,10 @@ Things that are not yet auto-converted:
 # Ticket migration
 
 1. Copy `config.py.sample` over `config.py`, and edit all the settings.
-2. If you are sure you want to create tickets, change `DRY_RUN` to `False`
+2. Get the latest `projects_created.tsv` to avoid duplicating projects.
+3. Modify `select_tickets` to your liking.
+4. If you are sure you want to create tickets, change `DRY_RUN` to `False`
    in `ticket_migrate.py`.
-3. Run `./ticket_migrate.py ../trac.db`, where `../trac.db` is the path
+5. Run `./ticket_migrate.py ../trac.db`, where `../trac.db` is the path
    to the Trac SQLite DB dump.
 
