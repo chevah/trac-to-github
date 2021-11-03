@@ -9,12 +9,14 @@ Works with Python 3.8.
 
 For wiki migration, you will need git available in your dev environment.
 
-This is a 2 stage process:
+This is a 3 stage process:
 
-1. Create the GitHub Wiki pages using content formated as TracWiki.
+1. Copy `config.py.sample` over `config.py`, and edit all the settings.
+
+2. Create the GitHub Wiki pages using content formated as TracWiki.
    This is done to have better diffs between historic versions.
 
-2. Convert the last version of the each page to ReStructuredText,
+3. Convert the last version of the each page to ReStructuredText,
    or to any other format.
 
 

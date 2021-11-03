@@ -144,7 +144,8 @@ def read_trac_comments():
 
     The last version is in the `newvalue` of the `comment` field.
 
-    Example changed comment: https://trac.chevah.com/ticket/3928#comment:1
+    To find changed comments, check the `ticket_change` table in the DB
+    for the `field` column having the value `_comment0`.
     """
     db = get_db()
     for row in db.execute(
@@ -748,8 +749,8 @@ def labels_from_status_and_resolution(status, resolution):
 
 def parse_body(description):
     """
-    Parses text with squiggly-bracketed or backtick-surrounded monospace.
-    Converts the squiggly brackets to backtick brackets.
+    Parses text with curly-bracketed or backtick-surrounded monospace.
+    Converts the curly brackets to backtick brackets.
     """
     if not description:
         return ''
@@ -765,15 +766,15 @@ def parse_body(description):
         return found(a) and (not found(b) or b > a)
 
     min_backtick = description.find('`')
-    min_squiggly = description.find('{{{')
+    min_curly = description.find('{{{')
 
-    if is_first_index(min_squiggly, min_backtick):
+    if is_first_index(min_curly, min_backtick):
         return (
-            convert_issue_content(description[:min_squiggly]) +
-            parse_squiggly(description[min_squiggly:])
+            convert_issue_content(description[:min_curly]) +
+            parse_curly(description[min_curly:])
             )
 
-    if is_first_index(min_backtick, min_squiggly):
+    if is_first_index(min_backtick, min_curly):
         return (
             convert_issue_content(description[:min_backtick]) +
             parse_backtick(description[min_backtick:])
@@ -787,18 +788,18 @@ def convert_issue_content(text):
     Convert TracWiki text to GitHub Markdown.
     Ignore included images.
     """
-    return convert(text, '')
+    return convert(text, base_path='')
 
 
-def parse_squiggly(description):
+def parse_curly(description):
     """
-    Interpret squiggly brackets:
+    Interpret curly brackets:
 
     - If a #!rst marker is the first token,
     remove the brackets and return the text inside.
 
     - Otherwise, convert the brackets to triple backticks.
-    Leave text as is until the closing squiggly brackets,
+    Leave text as is until the closing curly brackets,
     which are again converted to triple backticks.
     After that, let parse_body continue.
     """
