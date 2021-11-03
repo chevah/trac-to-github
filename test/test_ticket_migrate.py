@@ -371,6 +371,7 @@ class TestGitHubRequest(unittest.TestCase):
             'owner': 'danuker',
             'status': 'closed',
             'resolution': 'wontfix',
+            'milestone': 'some-milestone',
             'summary': 'summary',
             'description': 'description',
             'priority': 'high',
@@ -394,6 +395,7 @@ class TestGitHubRequest(unittest.TestCase):
             ['easy', 'feature', 'priority-high', 'wontfix'],
             request.data['labels'])
         self.assertEqual(['danuker'], request.data['assignees'])
+        self.assertEqual('some-milestone', request.milestone)
         self.assertEqual('summary', request.data['title'])
         self.assertEqual(
             'T6 task was created by adiroiban on 2010-11-04 15:04:51Z.\n'

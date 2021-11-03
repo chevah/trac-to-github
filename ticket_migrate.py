@@ -4,8 +4,8 @@ import datetime
 import pprint
 import sqlite3
 import sys
+import time
 from collections import deque
-from time import sleep
 from typing import Union
 
 import requests
@@ -58,11 +58,25 @@ def main():
 def select_tickets(tickets):
     """
     Easy-to-edit method to choose tickets to submit.
-    Useful in case of failure while creating tickets.
-    You can check here that the `t_id` is not in `tickets_created.tsv`.
+    Checks that the `t_id` is not in `tickets_created.tsv`.
+    Useful for creating tickets in multiple rounds.
     """
-    # return [t for t in tickets if t['t_id'] == 5519]
+    # Skip tickets that have already been created.
+    submitted_ids = []
+    with open('tickets_created.tsv') as f:
+        for line in f:
+            trac_link = line.split('\t')[0]
+            if trac_link.startswith(config.TRAC_TICKET_PREFIX):
+                trac_id = trac_link.split(config.TRAC_TICKET_PREFIX)[1]
+                trac_id = int(trac_id)
+                submitted_ids.append(trac_id)
+    tickets = [t for t in tickets if t['t_id'] not in submitted_ids]
+
+    # return [t for t in tickets if t['t_id'] == 237]
     # return [t for t in tickets if t['status'] != 'closed']
+    # return [t for t in tickets if t['component'] == 'pr']
+    # return [t for t in tickets if t['component'] == 'libs']
+    # return [t for t in tickets if t['component'] not in ['pr', 'libs']]
     return tickets
 
 
@@ -223,6 +237,8 @@ class NumberPredictor:
         except KeyError:
             raise KeyError(f"Couldn't get tickets from {config.OWNER}/{repo}.")
 
+        wait_for_rate_reset(tickets_or_pulls)
+
         return last_number
 
     def orderTickets(self, tickets):
@@ -347,15 +363,16 @@ class GitHubRequest:
     """
     def __init__(
             self, owner, repo, trac_id,
-            title, body, closed, milestone, labels, assignees):
+            title, body, closed, resolution, milestone, labels, assignees):
         self.owner = owner
         self.repo = repo
         self.t_id = trac_id
         self.closed = closed
+        self.resolution = resolution
+        self.milestone = milestone
         self.data = {
             'title': title,
             'body': body,
-            'milestone': milestone,
             'labels': labels,
             'assignees': assignees,
             }
@@ -375,28 +392,7 @@ class GitHubRequest:
         """
         url = f'https://api.github.com/repos/{self.owner}/{self.repo}/issues'
 
-        if DRY_RUN:
-            print(f"Would post to {url}:\n{self.data}")
-            self.github_number = expected_number
-            return
-
-        # Avoid crossing the rate limit (5000/hr).
-        sleep(1)
-
-        response = requests.post(
-            url=url,
-            headers={'accept': 'application/vnd.github.v3+json'},
-            json=self.data,
-            auth=(config.OAUTH_USER, config.OAUTH_TOKEN)
-            )
-
-        if response.status_code != 201:
-            print('Error: Issue not created!')
-            print(response.status_code, response.reason)
-            print(response.text)
-            pprint.pprint(response.headers)
-            import pdb
-            pdb.set_trace()
+        response = protected_request(url=url, data=self.data)
 
         # Remember the GitHub URL assigned to each ticket.
         with open('tickets_created.tsv', 'a') as f:
@@ -404,16 +400,13 @@ class GitHubRequest:
             f.write(f'{self.trac_url()}\t{github_url}\n')
 
         if response.json()['number'] != expected_number:
-            print(f"Expected number {expected_number}, got {github_url}.")
-            print(
-                "Back up the Trac DB, "
-                "delete the submitted tickets from the currently used copy, "
-                "and try again.\n"
-                "Also, the comments of this ticket will not be posted.\n"
-                "Close the debugger after you found the problem."
+            raise ValueError(
+                f"Ticket number mismatch: "
+                f"expected {expected_number}, created {github_url}.\n"
+                f"Please manually add the comments and project of the issue, "
+                f"close the issue if needed, "
+                f"and then restart the script."
                 )
-            import pdb
-            pdb.set_trace()
 
         self.github_number = expected_number
         self.github_id = response.json()['id']
@@ -434,39 +427,79 @@ class GitHubRequest:
         for comment in (c for c in comments if c['t_id'] == self.t_id):
             self._submitComment(self.commentFromTracData(comment))
 
+    def getOrCreateProject(self):
+        """
+        If a project for the given milestone exists, return its column IDs,
+        otherwise create it and return its column IDs.
+        Remembers projects in `projects_created.tsv`.
+
+        API docs:
+        https://docs.github.com/en/rest/reference/projects#create-an-organization-project
+        https://docs.github.com/en/rest/reference/projects#create-a-project-column
+        """
+        name = self.milestone
+
+        # Check whether we have already created the project.
+        with open('projects_created.tsv') as f:
+            projects_data = [line.split('\t') for line in f]
+            for line_name, _, todo_id, done_id, rejected_id in projects_data:
+                if line_name == name:
+                    return todo_id, done_id, rejected_id
+
+        # We have not created the project. Create it and its columns.
+        url = f'https://api.github.com/orgs/{self.owner}/projects'
+        data = {
+            'name': name,
+            }
+
+        response = protected_request(url, data)
+        project_id = response.json()['id']
+        columns_url = response.json()['columns_url']
+
+        # Create 3 columns: To Do, Done, and Rejected.
+        todo_resp = protected_request(columns_url, data={'name': 'To Do'})
+        done_resp = protected_request(columns_url, data={'name': 'Done'})
+        rejected_resp = protected_request(columns_url, data={
+            'name': 'Rejected', 'body': 'duplicate, invalid, or wontfix'})
+
+        todo_id = todo_resp.json()['id']
+        done_id = done_resp.json()['id']
+        rejected_id = rejected_resp.json()['id']
+
+        with open('projects_created.tsv', 'a') as f:
+            f.write('\t'.join([
+                name,
+                str(project_id),
+                str(todo_id),
+                str(done_id),
+                str(rejected_id),
+                ]) + '\n')
+
+        return todo_id, done_id, rejected_id
+
     def submitToProject(self):
         """
         Add an issue identified by the GitHub global `id`
-        to the configured column ID of a project.
+        to the proper column of a project.
 
         API docs (very bad ones):
         https://docs.github.com/en/rest/reference/projects#create-a-project-card
         """
-        column_id = config.COLUMN_ID
+        todo_id, done_id, rejected_id = self.getOrCreateProject()
+
+        # Set the column ID according to issue status and resolution.
+        column_id = todo_id
+        if self.closed:
+            column_id = rejected_id
+            if self.resolution == 'fixed':
+                column_id = done_id
+
         url = f'https://api.github.com/projects/columns/{column_id}/cards'
         data = {
             'content_id': self.github_id,
             'content_type': 'Issue'
             }
-
-        if DRY_RUN:
-            print(f"Would post to {url}:")
-            pprint.pprint(data)
-            return
-
-        response = requests.post(
-            url=url,
-            headers={'accept': 'application/vnd.github.v3+json'},
-            json=data,
-            auth=(config.OAUTH_USER, config.OAUTH_TOKEN)
-            )
-
-        if response.status_code != 201:
-            print('Error: Issue not added to project column!')
-            print(response)
-            pprint.pprint(response.json())
-            import pdb
-            pdb.set_trace()
+        protected_request(url, data)
 
     @classmethod
     def fromTracData(
@@ -488,7 +521,8 @@ class GitHubRequest:
             title=summary,
             body=get_body(description, data=kwargs),
             closed=kwargs['status'] == 'closed',
-            milestone=None,
+            resolution=kwargs['resolution'],
+            milestone=kwargs['milestone'],
             labels=get_labels(
                 component,
                 priority,
@@ -541,23 +575,7 @@ class GitHubRequest:
             import pdb
             pdb.set_trace()
 
-        # Avoid crossing the rate limit (5000/hr).
-        sleep(1)
-
-        response = requests.post(
-            url=url,
-            headers={'accept': 'application/vnd.github.v3+json'},
-            json=comment_data,
-            auth=(config.OAUTH_USER, config.OAUTH_TOKEN)
-            )
-
-        if response.status_code != 201:
-            print('Error: Comment not created!')
-            print(response.status_code, response.reason)
-            print(response.text)
-            print(response.headers)
-            import pdb
-            pdb.set_trace()
+        response = protected_request(url=url, data=comment_data)
 
         # Remember the GitHub URL assigned to each ticket.
         with open('comments_created.tsv', 'a') as f:
@@ -584,23 +602,57 @@ class GitHubRequest:
             )
 
         if self.closed:
-            if DRY_RUN:
-                print(f"Would close issue by PATCHing: {url}")
-                return
-
-            response = requests.patch(
+            protected_request(
                 url=url,
-                headers={'accept': 'application/vnd.github.v3+json'},
-                json={'state': 'closed'},
-                auth=(config.OAUTH_USER, config.OAUTH_TOKEN)
+                data={'state': 'closed'},
+                method=requests.patch,
+                expected_status_code=200
                 )
-            if response.status_code != 200:
-                print('Error: Issue not closed!')
-                print(response.status_code, response.reason)
-                print(response.text)
-                print(response.headers)
-                import pdb
-                pdb.set_trace()
+
+
+def protected_request(
+        url, data, method=requests.post, expected_status_code=201):
+    """
+    Send a request if DRY_RUN is not truthy.
+
+    In case of error, start the debugger.
+    In case of nearing rate limit, sleep until it resets.
+    """
+
+    if DRY_RUN:
+        print(f"Would send {method} to {url}:")
+        pprint.pprint(data)
+
+    response = method(
+        url=url,
+        headers={'accept': 'application/vnd.github.v3+json'},
+        json=data,
+        auth=(config.OAUTH_USER, config.OAUTH_TOKEN)
+        )
+
+    if response.status_code != expected_status_code:
+        print('Error: POST request failed!')
+        print(response)
+        pprint.pprint(response.json())
+        import pdb
+        pdb.set_trace()
+
+    wait_for_rate_reset(response)
+
+    return response
+
+
+def wait_for_rate_reset(response):
+    """
+    Wait for a rate limit reset in case it is near exhaustion.
+    """
+    remaining = int(response.headers['X-RateLimit-Remaining'])
+    reset_time = int(response.headers['X-RateLimit-Reset'])
+    if remaining < 10:
+        to_sleep = int(1 + reset_time - time.time())
+        print(
+            f"Waiting {to_sleep}s (until {reset_time}) for rate limit reset.")
+        time.sleep(to_sleep)
 
 
 def get_body(description, data):
@@ -735,14 +787,16 @@ def labels_from_priority(priority):
 def labels_from_status_and_resolution(status, resolution):
     """
     The resolution of a closed ticket is used, if there is one.
-    Otherwise, the status is used, if it is not "assigned", "new", or "closed".
-    """
+    The resolution can be "fixed", "duplicate", "invalid", or "wontfix".
 
+    If the ticket is not closed, the status is used,
+    if the status is not "assigned", "new", or "closed".
+    """
     if status == 'closed' and resolution:
         return {resolution}
 
     if status in ['in_work', 'needs_changes', 'needs_merge', 'needs_review']:
-        return {status}
+        return {status.replace('_', '-')}
 
     return set()
 
