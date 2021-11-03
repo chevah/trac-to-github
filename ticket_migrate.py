@@ -394,22 +394,23 @@ class GitHubRequest:
 
         response = protected_request(url=url, data=self.data)
 
-        # Remember the GitHub URL assigned to each ticket.
-        with open('tickets_created.tsv', 'a') as f:
-            github_url = response.json()['html_url']
-            f.write(f'{self.trac_url()}\t{github_url}\n')
+        if response:
+            # Remember the GitHub URL assigned to each ticket.
+            with open('tickets_created.tsv', 'a') as f:
+                github_url = response.json()['html_url']
+                f.write(f'{self.trac_url()}\t{github_url}\n')
 
-        if response.json()['number'] != expected_number:
-            raise ValueError(
-                f"Ticket number mismatch: "
-                f"expected {expected_number}, created {github_url}.\n"
-                f"Please manually add the comments and project of the issue, "
-                f"close the issue if needed, "
-                f"and then restart the script."
-                )
+            if response.json()['number'] != expected_number:
+                raise ValueError(
+                    f"Ticket number mismatch: "
+                    f"expected {expected_number}, created {github_url}.\n"
+                    f"Please manually add the comments and project of the issue, "
+                    f"close the issue if needed, "
+                    f"and then restart the script."
+                    )
 
-        self.github_number = expected_number
-        self.github_id = response.json()['id']
+            self.github_number = expected_number
+            self.github_id = response.json()['id']
 
     def trac_url(self):
         """
@@ -446,13 +447,11 @@ class GitHubRequest:
                 if line_name == name:
                     return todo_id, done_id, rejected_id
 
-        # We have not created the project. Create it and its columns.
-        url = f'https://api.github.com/orgs/{self.owner}/projects'
-        data = {
-            'name': name,
-            }
-
-        response = protected_request(url, data)
+        # We have not created the project. Create it.
+        response = protected_request(
+            url=f'https://api.github.com/orgs/{config.PROJECT_ORG}/projects',
+            data={'name': name}
+            )
         project_id = response.json()['id']
         columns_url = response.json()['columns_url']
 
@@ -461,6 +460,14 @@ class GitHubRequest:
         done_resp = protected_request(columns_url, data={'name': 'Done'})
         rejected_resp = protected_request(columns_url, data={
             'name': 'Rejected', 'body': 'duplicate, invalid, or wontfix'})
+
+        # Close the project.
+        protected_request(
+            url=f'https://api.github.com/projects/{project_id}',
+            data={'state': 'closed'},
+            method=requests.patch,
+            expected_status_code=200,
+            )
 
         todo_id = todo_resp.json()['id']
         done_id = done_resp.json()['id']
@@ -480,7 +487,7 @@ class GitHubRequest:
     def submitToProject(self):
         """
         Add an issue identified by the GitHub global `id`
-        to the proper column of a project.
+        to the proper column of the proper project.
 
         API docs (very bad ones):
         https://docs.github.com/en/rest/reference/projects#create-a-project-card
@@ -566,21 +573,13 @@ class GitHubRequest:
         url = f'https://api.github.com/repos/' \
               f'{self.owner}/{self.repo}/issues/{self.github_number}/comments'
 
-        if DRY_RUN:
-            print(f"Would post to {url}:\n{comment_data}")
-            return
-
-        if not self.github_number:
-            print(f"Trac ticket {self.t_id} did not receive a GitHub number.")
-            import pdb
-            pdb.set_trace()
-
         response = protected_request(url=url, data=comment_data)
 
-        # Remember the GitHub URL assigned to each ticket.
-        with open('comments_created.tsv', 'a') as f:
-            github_url = response.json()['html_url']
-            f.write(f'{self.trac_url()}\t{github_url}\n')
+        if response:
+            # Remember the GitHub URL assigned to each ticket.
+            with open('comments_created.tsv', 'a') as f:
+                github_url = response.json()['html_url']
+                f.write(f'{self.trac_url()}\t{github_url}\n')
 
     def closeIfNeeded(self):
         """
@@ -591,11 +590,6 @@ class GitHubRequest:
         API docs:
         https://docs.github.com/en/rest/reference/issues#update-an-issue
         """
-        if not self.github_number:
-            print('No GitHub number assigned. Was this issue posted?')
-            import pdb
-            pdb.set_trace()
-
         url = (
             f'https://api.github.com/repos/{self.owner}/{self.repo}/issues/'
             f'{self.github_number}'
@@ -620,8 +614,9 @@ def protected_request(
     """
 
     if DRY_RUN:
-        print(f"Would send {method} to {url}:")
+        print(f"Would call {method} on {url} with data:")
         pprint.pprint(data)
+        return
 
     response = method(
         url=url,
