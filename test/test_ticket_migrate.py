@@ -146,7 +146,8 @@ class TestBody(unittest.TestCase):
                     'time': 1234,
                     'changetime': 1234,
                     'branch': None,
-                    }
+                    },
+                ticket_mapping={},
                 )
             )
 
@@ -168,47 +169,51 @@ class TestBody(unittest.TestCase):
                     'time': 1234,
                     'changetime': 1234,
                     'branch': ''
-                    }
+                    },
+                ticket_mapping={},
                 )
             )
 
 
 class TestParseBody(unittest.TestCase):
-    def test_parse_body_backticks(self):
+    def test_backticks(self):
         """
         Monospace backticks are preserved.
         """
         self.assertEqual(
             'text `monospace` text',
-            tm.parse_body('text `monospace` text')
+            tm.parse_body('text `monospace` text', ticket_mapping={})
             )
 
-    def test_parse_body_squiggly(self):
+    def test_curly(self):
         self.assertEqual(
             'text ```monospace``` text',
-            tm.parse_body('text {{{monospace}}} text')
+            tm.parse_body('text {{{monospace}}} text', ticket_mapping={})
             )
 
-    def test_parse_body_monospace_escaping(self):
+    def test_monospace_escaping(self):
         """
         Escapes one monospace syntax with the other.
         """
         self.assertEqual(
-            "```squiggly '''not bold'''```",
-            tm.parse_body("{{{squiggly '''not bold'''}}}")
+            "```curly '''not bold'''```",
+            tm.parse_body("{{{curly '''not bold'''}}}", ticket_mapping={})
             )
 
         self.assertEqual(
             "`backtick '''not bold'''`",
-            tm.parse_body("`backtick '''not bold'''`")
+            tm.parse_body("`backtick '''not bold'''`", ticket_mapping={})
             )
 
         self.assertEqual(
             "quoting squigglies `{{{` or backticks ```````",
-            tm.parse_body("quoting squigglies `{{{` or backticks {{{`}}}")
+            tm.parse_body(
+                "quoting squigglies `{{{` or backticks {{{`}}}",
+                ticket_mapping={},
+                )
             )
 
-    def test_parse_body_convert_content(self):
+    def test_convert_content(self):
         """
         Headings are converted.
         """
@@ -220,11 +225,12 @@ class TestParseBody(unittest.TestCase):
             tm.parse_body(
                 "= Some Top Heading =\n"
                 "\n"
-                "Content {{{here}}}"
+                "Content {{{here}}}",
+                ticket_mapping={},
                 )
             )
 
-    def test_parse_body_convert_content_in_monospace(self):
+    def test_convert_content_in_monospace(self):
         """
         Monospaced sections are not converted from TracWiki syntax.
         """
@@ -244,11 +250,12 @@ class TestParseBody(unittest.TestCase):
                 "= Some Top Heading =\n"
                 "\n"
                 "Content here}}}\n"
-                "Some other content"
+                "Some other content",
+                ticket_mapping={},
                 )
             )
 
-    def test_parse_body_convert_RST(self):
+    def test_convert_RST(self):
         """
         Leaves RST syntax as-is, does not treat it as monospace.
         """
@@ -269,11 +276,12 @@ class TestParseBody(unittest.TestCase):
                 "-------\n"
                 "\n"
                 "Solution.\n"
-                "}}}\n"
+                "}}}\n",
+                ticket_mapping={},
                 )
             )
 
-    def test_parse_body_links(self):
+    def test_links(self):
         """
         TracWiki syntax links get converted to Markdown links.
         """
@@ -284,7 +292,57 @@ class TestParseBody(unittest.TestCase):
             tm.parse_body(
                 "In order to "
                 "[https://github.com/chevah/sftpplus.com/pull/254 avoid third-party cookies], "
-                "we need to handle the contact form ourselves."
+                "we need to handle the contact form ourselves.",
+                ticket_mapping={},
+                )
+            )
+
+    def test_ticket_replacement(self):
+        """
+        Converts Trac ticket IDs to GitHub numbers.
+        """
+        self.assertEqual(
+            "Some issue is solved in [#234](some_url/234).",
+            tm.parse_body(
+                description="Some issue is solved in #123.",
+                ticket_mapping={123: 'some_url/234'},
+                )
+            )
+
+    def test_missing_ticket_replacement(self):
+        """
+        Leaves missing Trac ticket IDs alone.
+        """
+        self.assertEqual(
+            "Some issue is solved in #345.",
+            tm.parse_body(
+                description="Some issue is solved in #345.",
+                ticket_mapping={123: 'some_url/234'},
+                )
+            )
+
+    def test_no_ticket_replacement_in_preformatted(self):
+        """
+        Does not convert Trac ticket IDs to GitHub numbers
+        in preformatted text.
+        """
+        self.assertEqual(
+            "```Some issue is solved in #123.```",
+            tm.parse_body(
+                description="{{{Some issue is solved in #123.}}}",
+                ticket_mapping={123: 'some_url/234'},
+                )
+            )
+
+    def test_no_ticket_replacement_subset_match(self):
+        """
+        Does not convert Trac ticket IDs when only a string subset matches.
+        """
+        self.assertEqual(
+            "Some issue is solved in #1234.",
+            tm.parse_body(
+                description="Some issue is solved in #1234.",
+                ticket_mapping={123: 'some_url/234'},
                 )
             )
 
@@ -308,7 +366,10 @@ class TestCommentGeneration(unittest.TestCase):
 
         self.assertEqual(
             desired_body,
-            tm.GitHubRequest.commentFromTracData(trac_data)['body']
+            tm.GitHubRequest.commentFromTracData(
+                trac_data,
+                ticket_mapping={}
+                )['body']
             )
 
     def test_no_user(self):
@@ -329,7 +390,10 @@ class TestCommentGeneration(unittest.TestCase):
 
         self.assertEqual(
             desired_body,
-            tm.GitHubRequest.commentFromTracData(trac_data)['body']
+            tm.GitHubRequest.commentFromTracData(
+                trac_data,
+                ticket_mapping={}
+                )['body']
             )
 
     def test_formatting(self):
@@ -352,7 +416,10 @@ class TestCommentGeneration(unittest.TestCase):
 
         self.assertEqual(
             desired_body,
-            tm.GitHubRequest.commentFromTracData(trac_data)['body']
+            tm.GitHubRequest.commentFromTracData(
+                trac_data,
+                ticket_mapping={},
+                )['body']
             )
 
 
@@ -366,23 +433,26 @@ class TestGitHubRequest(unittest.TestCase):
         one GitHubRequest object with the proper fields.
         """
 
-        request_gen = tm.GitHubRequest.fromTracDataMultiple([{
-            'component': 'trac-migration-staging',
-            'owner': 'danuker',
-            'status': 'closed',
-            'resolution': 'wontfix',
-            'milestone': 'some-milestone',
-            'summary': 'summary',
-            'description': 'description',
-            'priority': 'high',
-            'keywords': 'feature, easy',
-            'reporter': 'adi',
-            't_id': 6,
-            't_type': 'task',
-            'time': 1288883091000000,
-            'changetime': 1360238496689890,
-            'branch': 'https://github.com/chevah/agent-1.5/pull/10'
-            }])
+        request_gen = tm.GitHubRequest.fromTracDataMultiple(
+            trac_data=[{
+                'component': 'trac-migration-staging',
+                'owner': 'danuker',
+                'status': 'closed',
+                'resolution': 'wontfix',
+                'milestone': 'some-milestone',
+                'summary': 'summary',
+                'description': 'description',
+                'priority': 'high',
+                'keywords': 'feature, easy',
+                'reporter': 'adi',
+                't_id': 6,
+                't_type': 'task',
+                'time': 1288883091000000,
+                'changetime': 1360238496689890,
+                'branch': 'https://github.com/chevah/agent-1.5/pull/10'
+                }],
+            ticket_mapping={},
+            )
 
         requests = list(request_gen)
         self.assertEqual(1, len(requests))

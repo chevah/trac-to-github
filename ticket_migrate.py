@@ -2,13 +2,14 @@
 # Migrate Trac tickets to GitHub.
 import datetime
 import pprint
+import requests
 import sqlite3
 import sys
 import time
 from collections import deque
 from typing import Union
 
-import requests
+from wiki_trac_rst_convert import matches, sub
 
 try:
     import config
@@ -19,7 +20,7 @@ except ModuleNotFoundError:
 from trac2down import convert
 
 # Set to False to perform actual GitHub issue creation.
-DRY_RUN = True
+DRY_RUN = False
 
 
 def main():
@@ -31,8 +32,12 @@ def main():
     np = NumberPredictor()
     tickets, expected_numbers = np.orderTickets(tickets)
 
+    ticket_mapping = get_ticket_mapping(tickets, expected_numbers)
+
     # Parse tickets into GitHub issue objects.
-    issues = list(GitHubRequest.fromTracDataMultiple(tickets))
+    issues = list(GitHubRequest.fromTracDataMultiple(
+        tickets, ticket_mapping=ticket_mapping
+        ))
 
     output_stats(issues, expected_numbers)
 
@@ -48,7 +53,7 @@ def main():
           "comments, adding the issues to projects, and closing if needed.")
 
     for issue in issues:
-        issue.submitMyComments(comments)
+        issue.submitMyComments(comments, ticket_mapping=ticket_mapping)
         # Submit to project before closing the issue,
         # so the issue may auto-move to another column (such as "Done").
         issue.submitToProject()
@@ -62,22 +67,45 @@ def select_tickets(tickets):
     Useful for creating tickets in multiple rounds.
     """
     # Skip tickets that have already been created.
-    submitted_ids = []
-    with open('tickets_created.tsv') as f:
-        for line in f:
-            trac_link = line.split('\t')[0]
-            if trac_link.startswith(config.TRAC_TICKET_PREFIX):
-                trac_id = trac_link.split(config.TRAC_TICKET_PREFIX)[1]
-                trac_id = int(trac_id)
-                submitted_ids.append(trac_id)
+    submitted_ids = get_created_tickets().keys()
     tickets = [t for t in tickets if t['t_id'] not in submitted_ids]
 
-    # return [t for t in tickets if t['t_id'] == 237]
+    return [t for t in tickets if t['t_id'] == 828]
     # return [t for t in tickets if t['status'] != 'closed']
     # return [t for t in tickets if t['component'] == 'pr']
     # return [t for t in tickets if t['component'] == 'libs']
     # return [t for t in tickets if t['component'] not in ['pr', 'libs']]
     return tickets
+
+
+def get_ticket_mapping(tickets, expected_numbers):
+    """
+    Returns a dictionary of all known Trac ID -> GitHub URL correspondences.
+    The GitHub URL may either be expected, or read from tickets_created.tsv.
+    """
+    mapping = get_created_tickets()
+    for ticket, expected_number in zip(tickets, expected_numbers):
+        mapping[ticket['t_id']] = github_link(
+            repo=get_repo(ticket['component']),
+            expected_number=expected_number,
+            )
+    return mapping
+
+
+def get_created_tickets():
+    """
+    Reads the tickets_create.tsv, and returns a dictionary of
+    Trac ID -> GitHub URL of tickets that were sent to GitHub already.
+    """
+    created_tickets = {}
+    with open('tickets_created.tsv') as f:
+        for line in f:
+            if line.startswith(config.TRAC_TICKET_PREFIX):
+                trac_link, github_url = line.strip().split('\t')
+                trac_id = trac_link.split(config.TRAC_TICKET_PREFIX)[1]
+                trac_id = int(trac_id)
+                created_tickets[trac_id] = github_url
+    return created_tickets
 
 
 def read_trac_tickets():
@@ -343,17 +371,25 @@ def output_stats(tickets, expected_numbers):
     with open('tickets_expected.tsv', 'w') as f:
         f.write('Trac link\tExpected GitHub link\tMatch\n')
         for t, e in zipped:
-            github_link = f'https://github.com/' \
-                          f'{config.OWNER}/{t.repo}/issues/{e}'
+            _github_link = github_link(t.repo, e)
             match = int(t.t_id == e)
 
-            f.write(f"{t.trac_url()}\t{github_link}\t{match}\n")
+            f.write(f"{t.trac_url()}\t{_github_link}\t{match}\n")
 
-    matches = sum(1 for t, e in zipped if t.t_id == e)
-    print('Expected GitHub numbers to equal Trac ID:'
-          f'\t{matches} out of {len(tickets)}')
+    match_count = sum(1 for t, e in zipped if t.t_id == e)
+    print('Expected GitHub numbers to match Trac ID: '
+          f'{match_count} out of {len(tickets)}')
     print('Check tickets_expected.tsv, and if correct, continue the debugger.')
-    import pdb; pdb.set_trace()
+    import pdb
+    pdb.set_trace()
+
+
+def github_link(repo, expected_number):
+    """
+    Return the expected GitHub URL,
+    given the repository name and expected GitHub issue number.
+    """
+    return f'https://github.com/{config.OWNER}/{repo}/issues/{expected_number}'
 
 
 class GitHubRequest:
@@ -418,7 +454,7 @@ class GitHubRequest:
         """
         return config.TRAC_TICKET_PREFIX + str(self.t_id)
 
-    def submitMyComments(self, comments):
+    def submitMyComments(self, comments, ticket_mapping):
         """
         Look through `comments`, and submit the ones about this ticket.
 
@@ -426,7 +462,8 @@ class GitHubRequest:
         https://docs.github.com/en/rest/reference/issues#create-an-issue-comment
         """
         for comment in (c for c in comments if c['t_id'] == self.t_id):
-            self._submitComment(self.commentFromTracData(comment))
+            self._submitComment(self.commentFromTracData(
+                comment, ticket_mapping=ticket_mapping))
 
     def getOrCreateProject(self):
         """
@@ -517,6 +554,7 @@ class GitHubRequest:
             description,
             priority,
             keywords,
+            ticket_mapping,
             **kwargs):
         """
         Create a GitHubRequest from Trac ticket data fields.
@@ -526,7 +564,8 @@ class GitHubRequest:
             repo=get_repo(component),
             trac_id=kwargs['t_id'],
             title=summary,
-            body=get_body(description, data=kwargs),
+            body=get_body(
+                description, data=kwargs, ticket_mapping=ticket_mapping),
             closed=kwargs['status'] == 'closed',
             resolution=kwargs['resolution'],
             milestone=kwargs['milestone'],
@@ -541,15 +580,17 @@ class GitHubRequest:
             )
 
     @classmethod
-    def fromTracDataMultiple(cls, trac_data):
+    def fromTracDataMultiple(cls, trac_data, ticket_mapping):
         """
         Generate GitHubRequests from an iterable of dicts of Trac tickets.
         """
         for ticket in trac_data:
-            yield cls.fromTracData(**ticket)
+            yield cls.fromTracData(
+                **{**ticket, 'ticket_mapping': ticket_mapping}
+                )
 
     @staticmethod
-    def commentFromTracData(trac_data):
+    def commentFromTracData(trac_data, ticket_mapping):
         """
         Convert Trac comment data to GitHub comment body as JSON.
         """
@@ -561,7 +602,7 @@ class GitHubRequest:
         body = (
             f"Comment by {author} at {showtime(trac_data['c_time'])}.\n"
             f"\n"
-            f"{parse_body(trac_data['newvalue'])}"
+            f"{parse_body(trac_data['newvalue'], ticket_mapping)}"
             )
 
         return {'body': body}
@@ -650,7 +691,7 @@ def wait_for_rate_reset(response):
         time.sleep(to_sleep)
 
 
-def get_body(description, data):
+def get_body(description, data, ticket_mapping):
     """
     Generate the ticket description body for GitHub.
     """
@@ -674,7 +715,7 @@ def get_body(description, data):
         f"{changed_message}"
         f"{pr_message}"
         "\n"
-        f"{parse_body(description)}"
+        f"{parse_body(description, ticket_mapping)}"
         )
 
     return body
@@ -796,7 +837,7 @@ def labels_from_status_and_resolution(status, resolution):
     return set()
 
 
-def parse_body(description):
+def parse_body(description, ticket_mapping):
     """
     Parses text with curly-bracketed or backtick-surrounded monospace.
     Converts the curly brackets to backtick brackets.
@@ -819,28 +860,43 @@ def parse_body(description):
 
     if is_first_index(min_curly, min_backtick):
         return (
-            convert_issue_content(description[:min_curly]) +
-            parse_curly(description[min_curly:])
+            convert_issue_content(description[:min_curly], ticket_mapping) +
+            parse_curly(description[min_curly:], ticket_mapping)
             )
 
     if is_first_index(min_backtick, min_curly):
         return (
-            convert_issue_content(description[:min_backtick]) +
-            parse_backtick(description[min_backtick:])
+            convert_issue_content(description[:min_backtick], ticket_mapping) +
+            parse_backtick(description[min_backtick:], ticket_mapping)
             )
 
-    return convert_issue_content(description)
+    return convert_issue_content(description, ticket_mapping)
 
 
-def convert_issue_content(text):
+def convert_issue_content(text, ticket_mapping):
     """
     Convert TracWiki text to GitHub Markdown.
+    Change the ticket IDs to GitHub URLs according to the mapping.
     Ignore included images.
     """
+    ticket_re = '#([0-9]+)'
+    for match in matches(ticket_re, text):
+        try:
+            github_url = ticket_mapping[int(match)]
+            new_ticket_id = github_url.rsplit('/', 1)[1]
+            text = sub(
+                ticket_re,
+                f'[#{new_ticket_id}]({github_url})',
+                text
+                )
+        except KeyError:
+            # We don't know this ticket. Leave it alone.
+            pass
+
     return convert(text, base_path='')
 
 
-def parse_curly(description):
+def parse_curly(description, ticket_mapping):
     """
     Interpret curly brackets:
 
@@ -858,12 +914,18 @@ def parse_curly(description):
     content = description[3:ending-3]
 
     if content.strip().startswith('#!rst'):
-        return content.split('#!rst', 1)[1] + parse_body(description[ending:])
+        return (
+            content.split('#!rst', 1)[1] +
+            parse_body(description[ending:], ticket_mapping)
+            )
 
-    return '```' + content + '```' + parse_body(description[ending:])
+    return (
+        '```' + content + '```' +
+        parse_body(description[ending:], ticket_mapping)
+        )
 
 
-def parse_backtick(description):
+def parse_backtick(description, ticket_mapping):
     """
     Leave text as is until the closing backtick.
     After that, let parse_body continue.
@@ -872,7 +934,10 @@ def parse_backtick(description):
         raise ValueError('Desc starts with ', description[:10])
     description = description[1:]
     ending = description.find('`') + 1
-    return '`' + description[:ending] + parse_body(description[ending:])
+    return (
+        '`' + description[:ending] +
+        parse_body(description[ending:], ticket_mapping)
+        )
 
 
 if __name__ == '__main__':

@@ -117,8 +117,8 @@ def _trac_to_github_wiki_links(text: str):
         ]
 
     for link_re in link_matchers:
-        for title in _matches(link_re, text):
-            text = _sub(link_re, f'`<{_wiki_url(title)}>`_', text)
+        for title in matches(link_re, text):
+            text = sub(link_re, f'`<{_wiki_url(title)}>`_', text)
 
     return text
 
@@ -132,8 +132,8 @@ def _tracwiki_to_rst_links(text: str):
     link_text = '[^]]+'
     link_re = rf'\[({url}) ({link_text})]'
 
-    for url, link_text in _matches(link_re, text):
-        text = _sub(link_re, f'`{link_text} <{url}>`_', text)
+    for url, link_text in matches(link_re, text):
+        text = sub(link_re, f'`{link_text} <{url}>`_', text)
 
     return text
 
@@ -155,12 +155,12 @@ def _tracwiki_wiki_link_with_text_to_github_links(text: str):
         ]
 
     for link_re in link_matchers:
-        for title, link_text in _matches(link_re, text):
+        for title, link_text in matches(link_re, text):
             if title == link_text:
-                text = _sub(link_re, f'`<{_wiki_url(title)}>`_', text)
+                text = sub(link_re, f'`<{_wiki_url(title)}>`_', text)
             else:
                 replacement = f'`{link_text} <{_wiki_url(title)}>`_'
-                text = _sub(link_re, replacement, text)
+                text = sub(link_re, replacement, text)
 
     return text
 
@@ -171,8 +171,8 @@ def _trac_ticket_links(text: str):
     """
 
     ticket_re = ':trac:`#([0-9]+)`'
-    for ticket in _matches(ticket_re, text):
-        text = _sub(
+    for ticket in matches(ticket_re, text):
+        text = sub(
             ticket_re,
             f'`Trac #{ticket} <{config.TRAC_TICKET_PREFIX}{ticket}>`_',
             text
@@ -197,8 +197,8 @@ def _tracwiki_heading_to_rst_heading(text: str):
         Content here
     """
     heading_re = '^= (.*) =$'
-    for match in _matches(heading_re, text):
-        text = _sub(heading_re, _underline(match, '='), text)
+    for match in matches(heading_re, text):
+        text = sub(heading_re, _underline(match, '='), text)
 
     return text
 
@@ -219,8 +219,8 @@ def _tracwiki_subheading_to_rst_subheading(text: str):
         Content here
     """
     heading_re = '^== (.*) ==$'
-    for match in _matches(heading_re, text):
-        text = _sub(heading_re, _underline(match, '-'), text)
+    for match in matches(heading_re, text):
+        text = sub(heading_re, _underline(match, '-'), text)
 
     return text
 
@@ -232,8 +232,8 @@ def _tracwiki_list_dedent(text: str):
     """
 
     indented_list_item_re = r'^ \* '
-    for _ in _matches(indented_list_item_re, text):
-        text = _sub(indented_list_item_re, '* ', text)
+    for _ in matches(indented_list_item_re, text):
+        text = sub(indented_list_item_re, '* ', text)
 
     return text
 
@@ -270,14 +270,14 @@ def _underline(text: str, line_symbol: str):
     return text + "\n" + line_symbol * len(text)
 
 
-def _matches(pattern: str, text: str):
+def matches(pattern: str, text: str):
     """
     Return all matches of a particular `pattern` occurring in `text`.
     """
     return re.findall(pattern, text, flags=re.MULTILINE)
 
 
-def _sub(regex: str, replacement: str, text: str):
+def sub(regex: str, replacement: str, text: str):
     """
     Substitute one occurrence of `regex` in `text` with `replacement`.
     Return the resulting new text.
