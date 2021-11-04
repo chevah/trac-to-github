@@ -309,6 +309,39 @@ class TestParseBody(unittest.TestCase):
                 )
             )
 
+    def test_ticket_replacement_URL(self):
+        """
+        Converts Trac ticket URLs to GitHub URLs.
+        """
+        self.assertEqual(
+            "Issue [#234](some_url/234).",
+            tm.parse_body(
+                description="Issue https://trac.chevah.com/ticket/123.",
+                ticket_mapping={123: 'some_url/234'},
+                )
+            )
+
+    def test_ticket_replacement_multiple(self):
+        """
+        Converts Trac ticket IDs to GitHub numbers.
+        """
+        self.assertEqual(
+            "Some issue is solved in [#234](some_url/234).\n"
+            "Another issue in the same ticket [#234](some_url/234).\n"
+            "Yet another in a different ticket [#555](some_url/555).\n",
+            tm.parse_body(
+                description=(
+                    "Some issue is solved in #123.\n"
+                    "Another issue in the same ticket #123.\n"
+                    "Yet another in a different ticket #444.\n"
+                ),
+                ticket_mapping={
+                    123: 'some_url/234',
+                    444: 'some_url/555'
+                    },
+                )
+            )
+
     def test_missing_ticket_replacement(self):
         """
         Leaves missing Trac ticket IDs alone.

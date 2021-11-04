@@ -20,7 +20,7 @@ except ModuleNotFoundError:
 from trac2down import convert
 
 # Set to False to perform actual GitHub issue creation.
-DRY_RUN = False
+DRY_RUN = True
 
 
 def main():
@@ -46,18 +46,14 @@ def main():
 
     for issue, expected_number in zip(issues, expected_numbers):
         issue.submit(expected_number)
+        issue.closeIfNeeded()
+        issue.submitToProject()
+        issue.submitMyComments(comments, ticket_mapping=ticket_mapping)
 
     print("Issue creation complete. "
           "You may now manually open issues and PRs.\n"
           "Continuing with "
           "comments, adding the issues to projects, and closing if needed.")
-
-    for issue in issues:
-        issue.submitMyComments(comments, ticket_mapping=ticket_mapping)
-        # Submit to project before closing the issue,
-        # so the issue may auto-move to another column (such as "Done").
-        issue.submitToProject()
-        issue.closeIfNeeded()
 
 
 def select_tickets(tickets):
@@ -70,9 +66,8 @@ def select_tickets(tickets):
     submitted_ids = get_created_tickets().keys()
     tickets = [t for t in tickets if t['t_id'] not in submitted_ids]
 
-    return [t for t in tickets if t['t_id'] == 828]
     # return [t for t in tickets if t['status'] != 'closed']
-    # return [t for t in tickets if t['component'] == 'pr']
+    return [t for t in tickets if t['component'] == 'pr']
     # return [t for t in tickets if t['component'] == 'libs']
     # return [t for t in tickets if t['component'] not in ['pr', 'libs']]
     return tickets
@@ -659,6 +654,10 @@ def protected_request(
         pprint.pprint(data)
         return
 
+    # Obey secondary rate limit:
+    # https://docs.github.com/en/rest/guides/best-practices-for-integrators#dealing-with-secondary-rate-limits
+    time.sleep(10)
+
     response = method(
         url=url,
         headers={'accept': 'application/vnd.github.v3+json'},
@@ -879,13 +878,14 @@ def convert_issue_content(text, ticket_mapping):
     Change the ticket IDs to GitHub URLs according to the mapping.
     Ignore included images.
     """
+    text = text.replace(config.TRAC_TICKET_PREFIX, '#')
     ticket_re = '#([0-9]+)'
     for match in matches(ticket_re, text):
         try:
             github_url = ticket_mapping[int(match)]
             new_ticket_id = github_url.rsplit('/', 1)[1]
             text = sub(
-                ticket_re,
+                f'#{match}',
                 f'[#{new_ticket_id}]({github_url})',
                 text
                 )
