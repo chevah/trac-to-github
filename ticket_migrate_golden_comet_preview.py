@@ -1,5 +1,22 @@
 #!/usr/bin/env python3
 # Migrate Trac tickets to GitHub.
+# Uses the Golden Comet preview API:
+# https://gist.github.com/jonmagic/5282384165e0f86ef105
+""""
+Start an issue import:
+
+curl -X POST -H "Authorization: token ${GITHUB_TOKEN}" \
+  -H "Accept: application/vnd.github.golden-comet-preview+json" \
+  -d '{"issue":{"title":"Fix broken widgets", "closed": true, "body":"- [ ] widget 1\n- [ ] widget 2","created_at":"2014-03-16T18:21:16Z"},"comments":[{"body":"Can we wrap this up soon?","created_at":"2014-03-16T17:15:42Z"}]}' \
+  https://api.github.com/repos/${GITHUB_USERNAME}/trac-migration-staging/import/issues
+
+Check status:
+
+curl -H "Authorization: token ${GITHUB_TOKEN}" \
+  -H "Accept: application/vnd.github.golden-comet-preview+json" \
+  https://api.github.com/repos/${GITHUB_USERNAME}/trac-migration-staging/import/issues/4237445
+"""
+
 import datetime
 import pprint
 import requests
@@ -46,10 +63,12 @@ def main():
 
     for issue, expected_number in zip(issues, expected_numbers):
         print(f"Processing GH {expected_number}")
-        issue.submit(expected_number)
-        issue.closeIfNeeded()
+        issue.submit(
+            expected_number,
+            all_comments=comments,
+            ticket_mapping=ticket_mapping
+            )
         issue.submitToProject()
-        issue.submitMyComments(comments, ticket_mapping=ticket_mapping)
 
     print("Issue creation complete. You may now manually open issues and PRs.")
 
@@ -64,9 +83,9 @@ def select_tickets(tickets):
     submitted_ids = get_tickets().keys()
     tickets = [t for t in tickets if t['t_id'] not in submitted_ids]
 
-    # return [t for t in tickets if t['status'] != 'closed']
-    return [t for t in tickets if t['component'] == 'pr']
-    # return [t for t in tickets if t['component'] == 'libs']
+    # return [t for t in tickets if t['component'] == 'pr'] # DONE
+    return [t for t in tickets if t['component'] == 'libs']
+    # return [t for t in tickets if t['t_id'] == 828]
     # return [t for t in tickets if t['component'] not in ['pr', 'libs']]
     return tickets
 
@@ -242,7 +261,16 @@ class NumberPredictor:
         """
         Get the largest GitHub number, for either tickets or pulls.
         `kind` is either "issues" or "pulls".
-        Fortunately GitHub orders them newest first.
+
+        By default GitHub orders them newest first.
+        Unfortunately, we can't use the `created_at` API because of this.
+        We'd have to check all the pages of issues to find out which has the
+        greatest number.
+
+        Issue API docs:
+        https://docs.github.com/en/rest/reference/issues#list-repository-issues
+        PR API docs:
+        https://docs.github.com/en/rest/reference/pulls#list-pull-requests
         """
         tickets_or_pulls = requests.get(
             url=f'https://api.github.com/repos/{config.OWNER}/{repo}/{kind}',
@@ -389,7 +417,9 @@ class GitHubRequest:
     """
     def __init__(
             self, owner, repo, trac_id,
-            title, body, closed, resolution, milestone, labels, assignees):
+            title, body, closed, resolution, milestone, labels, assignees,
+            created_at, updated_at
+            ):
         self.owner = owner
         self.repo = repo
         self.t_id = trac_id
@@ -400,33 +430,74 @@ class GitHubRequest:
             'title': title,
             'body': body,
             'labels': labels,
-            'assignees': assignees,
+            'closed': closed,
             }
+        if assignees:
+            self.data['assignee'] = assignees[0]
+        # Avoid using `created_at` due to it messing up requestNextNumber.
+        # self.data['created_at'] = created_at
+        self.data['updated_at'] = updated_at
+        if closed:
+            # We are assuming closure is the last modification.
+            self.data['closed_at'] = updated_at
 
         # We get the issue number and ID after submitting.
         self.github_number = None
         self.github_id = None
 
-    def submit(self, expected_number):
+    def submit(self, expected_number, all_comments, ticket_mapping):
         """
         Execute the POST request to create a GitHub issue.
 
         In case of an unexpected state, go into debug mode.
 
         API Docs:
-        https://docs.github.com/en/rest/reference/issues#create-an-issue
+        https://gist.github.com/jonmagic/5282384165e0f86ef105#supported-issue-and-comment-fields
+        Get issue ID after created:
+        https://docs.github.com/en/rest/reference/issues#get-an-issue
         """
-        url = f'https://api.github.com/repos/{self.owner}/{self.repo}/issues'
+        url = f'https://api.github.com/repos/{self.owner}/{self.repo}/import/issues'
+        data = {
+            'issue': self.data,
+            'comments': []
+            }
 
-        response = protected_request(url=url, data=self.data)
+        for comment in (c for c in all_comments if c['t_id'] == self.t_id):
+            data['comments'].append(
+                self.commentFromTracData(
+                    comment, ticket_mapping=ticket_mapping
+                    )
+                )
+
+        response = protected_request(
+            url=url, data=data, expected_status_code=202)
 
         if response:
             # Remember the GitHub URL assigned to each ticket.
+            self.github_import_id = response.json()['id']
+
+            while response.json()['status'] == 'pending':
+                # Wait until our issue is created.
+                check_url = f'{url}/{self.github_import_id}'
+                response = protected_request(
+                    url=check_url,
+                    data=None,
+                    method=requests.get,
+                    expected_status_code=200
+                    )
+
+            if response.json()['status'] != 'imported':
+                response = debug_response(response)
+
             with open('tickets_created.tsv', 'a') as f:
-                github_url = response.json()['html_url']
+                github_url = response.json()['issue_url']
                 f.write(f'{self.trac_url()}\t{github_url}\n')
 
-            if response.json()['number'] != expected_number:
+            number = int(response.json()['issue_url'].rsplit('/', 1)[1])
+            self.github_number = number
+            print(f"Import {response.json()['id']} succeeded for #{number}.")
+
+            if number != expected_number:
                 raise ValueError(
                     f"Ticket number mismatch: "
                     f"expected {expected_number}, created {github_url}.\n"
@@ -435,25 +506,25 @@ class GitHubRequest:
                     f"and then restart the script."
                     )
 
-            self.github_number = expected_number
+            # Get the GitHub ID (not number), to post the issue to a project.
+            issue_url = (
+                f'https://api.github.com/repos/{self.owner}/{self.repo}/'
+                f'issues/{number}'
+                )
+            response = protected_request(
+                url=issue_url,
+                data=None,
+                method=requests.get,
+                expected_status_code=200
+                )
             self.github_id = response.json()['id']
+            print(f"Issue #{self.github_number} has GHID {self.github_id}.")
 
     def trac_url(self):
         """
         Return this issue's Trac URL.
         """
         return config.TRAC_TICKET_PREFIX + str(self.t_id)
-
-    def submitMyComments(self, comments, ticket_mapping):
-        """
-        Look through `comments`, and submit the ones about this ticket.
-
-        API Docs:
-        https://docs.github.com/en/rest/reference/issues#create-an-issue-comment
-        """
-        for comment in (c for c in comments if c['t_id'] == self.t_id):
-            self._submitComment(self.commentFromTracData(
-                comment, ticket_mapping=ticket_mapping))
 
     def getOrCreateProject(self):
         """
@@ -574,6 +645,8 @@ class GitHubRequest:
                 kwargs['resolution']
                 ),
             assignees=get_assignees(owner),
+            created_at=isotime(kwargs['time']),
+            updated_at=isotime(kwargs['changetime'])
             )
 
     @classmethod
@@ -602,44 +675,7 @@ class GitHubRequest:
             f"{parse_body(trac_data['newvalue'], ticket_mapping)}"
             )
 
-        return {'body': body}
-
-    def _submitComment(self, comment_data):
-        """
-        Send a POST request to GitHub creating the comment from `comment_data`.
-        """
-        url = f'https://api.github.com/repos/' \
-              f'{self.owner}/{self.repo}/issues/{self.github_number}/comments'
-
-        response = protected_request(url=url, data=comment_data)
-
-        if response:
-            # Remember the GitHub URL assigned to each ticket.
-            with open('comments_created.tsv', 'a') as f:
-                github_url = response.json()['html_url']
-                f.write(f'{self.trac_url()}\t{github_url}\n')
-
-    def closeIfNeeded(self):
-        """
-        If the ticket status is closed,
-        send a PATCH request to GitHub to close it.
-        Unfortunately we can't directly create it as closed.
-
-        API docs:
-        https://docs.github.com/en/rest/reference/issues#update-an-issue
-        """
-        url = (
-            f'https://api.github.com/repos/{self.owner}/{self.repo}/issues/'
-            f'{self.github_number}'
-            )
-
-        if self.closed:
-            protected_request(
-                url=url,
-                data={'state': 'closed'},
-                method=requests.patch,
-                expected_status_code=200
-                )
+        return {'created_at': isotime(trac_data['c_time']), 'body': body}
 
 
 def protected_request(
@@ -658,24 +694,35 @@ def protected_request(
 
     # Obey secondary rate limit:
     # https://docs.github.com/en/rest/guides/best-practices-for-integrators#dealing-with-secondary-rate-limits
-    time.sleep(10)
+    # If not using Golden Comet API, sleep 10 seconds here.
+    time.sleep(1)
 
     response = method(
         url=url,
-        headers={'accept': 'application/vnd.github.v3+json'},
+        headers={'accept': 'application/vnd.github.golden-comet-preview+json'},
         json=data,
         auth=(config.OAUTH_USER, config.OAUTH_TOKEN)
         )
 
     if response.status_code != expected_status_code:
-        print('Error: POST request failed!')
-        print(response)
-        pprint.pprint(response.json())
-        import pdb
-        pdb.set_trace()
+        print(f'Error: {method} request failed!')
+        debug_response(response)
 
     wait_for_rate_reset(response)
 
+    return response
+
+
+def debug_response(response):
+    """
+    Debug a response from a server.
+    Allow manually modifying the return value.
+    """
+    print(response)
+    pprint.pprint(dict(response.headers))
+    pprint.pprint(response.json())
+    import pdb
+    pdb.set_trace()
     return response
 
 
@@ -685,10 +732,11 @@ def wait_for_rate_reset(response):
     """
     remaining = int(response.headers['X-RateLimit-Remaining'])
     reset_time = int(response.headers['X-RateLimit-Reset'])
-    if remaining < 10:
+    if remaining < 50:
         to_sleep = int(1 + reset_time - time.time())
         print(
-            f"Waiting {to_sleep}s (until {reset_time}) for rate limit reset.")
+            f"Waiting {to_sleep / 60} minutes "
+            f"(until {reset_time}) for rate limit reset.")
         time.sleep(to_sleep)
 
 
@@ -762,6 +810,18 @@ def showtime(unix_usec):
     timestamp = unix_usec // 1_000_000
     dt = datetime.datetime.utcfromtimestamp(timestamp)
     return f"{dt.isoformat(sep=' ')}Z"
+
+
+def isotime(unix_usec):
+    """
+    Convert a Trac timestamp to a ISO 8601 date and time
+    fit for GitHub timestamps.
+
+    Trac stores timestamps as microseconds since Epoch.
+    """
+    timestamp = unix_usec // 1_000_000
+    dt = datetime.datetime.utcfromtimestamp(timestamp)
+    return f"{dt.isoformat(sep='T')}Z"
 
 
 def labels_from_component(component: str):

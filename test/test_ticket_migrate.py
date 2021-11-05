@@ -1,7 +1,7 @@
 import unittest
 
 import config_test
-import ticket_migrate as tm
+import ticket_migrate_golden_comet_preview as tm
 
 # Monkeypatch the SUT to use the test config.
 tm.config = config_test
@@ -342,6 +342,20 @@ class TestParseBody(unittest.TestCase):
                 )
             )
 
+    def test_ticket_replacement_URL_multiple(self):
+        """
+        Converts Trac ticket URLs to GitHub URLs.
+        """
+        self.assertEqual(
+            "(but see [#234](some_url/234)).\n"
+            "CMD [#234](some_url/234)",
+            tm.parse_body(
+                description="(but see https://trac.chevah.com/ticket/123).\n"
+                            "CMD https://trac.chevah.com/ticket/123",
+                ticket_mapping={123: 'some_url/234'},
+                )
+            )
+
     def test_missing_ticket_replacement(self):
         """
         Leaves missing Trac ticket IDs alone.
@@ -493,11 +507,11 @@ class TestGitHubRequest(unittest.TestCase):
 
         self.assertEqual('trac-migration-staging', request.repo)
         self.assertEqual('chevah', request.owner)
-        self.assertEqual(['danuker'], request.data['assignees'])
+        self.assertEqual('danuker', request.data['assignee'])
         self.assertEqual(
             ['easy', 'feature', 'priority-high', 'wontfix'],
             request.data['labels'])
-        self.assertEqual(['danuker'], request.data['assignees'])
+        self.assertEqual('danuker', request.data['assignee'])
         self.assertEqual('some-milestone', request.milestone)
         self.assertEqual('summary', request.data['title'])
         self.assertEqual(
