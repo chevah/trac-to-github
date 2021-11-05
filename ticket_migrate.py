@@ -63,7 +63,7 @@ def select_tickets(tickets):
     Useful for creating tickets in multiple rounds.
     """
     # Skip tickets that have already been created.
-    submitted_ids = get_created_tickets().keys()
+    submitted_ids = get_tickets().keys()
     tickets = [t for t in tickets if t['t_id'] not in submitted_ids]
 
     # return [t for t in tickets if t['status'] != 'closed']
@@ -78,22 +78,21 @@ def get_ticket_mapping(tickets, expected_numbers):
     Returns a dictionary of all known Trac ID -> GitHub URL correspondences.
     The GitHub URL may either be expected, or read from tickets_created.tsv.
     """
-    mapping = get_created_tickets()
-    for ticket, expected_number in zip(tickets, expected_numbers):
-        mapping[ticket['t_id']] = github_link(
-            repo=get_repo(ticket['component']),
-            expected_number=expected_number,
-            )
+    mapping = get_tickets()
+    expected_allrepos = get_tickets('tickets_expected_gold.tsv')
+    for ticket, expected_numbers in expected_allrepos.items():
+        mapping[ticket] = expected_numbers
+
     return mapping
 
 
-def get_created_tickets():
+def get_tickets(filename='tickets_created.tsv'):
     """
     Reads the tickets_create.tsv, and returns a dictionary of
     Trac ID -> GitHub URL of tickets that were sent to GitHub already.
     """
     created_tickets = {}
-    with open('tickets_created.tsv') as f:
+    with open(filename) as f:
         for line in f:
             if line.startswith(config.TRAC_TICKET_PREFIX):
                 trac_link, github_url = line.strip().split('\t')
@@ -364,12 +363,10 @@ def output_stats(tickets, expected_numbers):
     """
     zipped = list(zip(tickets, expected_numbers))
     with open('tickets_expected.tsv', 'w') as f:
-        f.write('Trac link\tExpected GitHub link\tMatch\n')
+        f.write('Trac link\tExpected GitHub link\n')
         for t, e in zipped:
             _github_link = github_link(t.repo, e)
-            match = int(t.t_id == e)
-
-            f.write(f"{t.trac_url()}\t{_github_link}\t{match}\n")
+            f.write(f"{t.trac_url()}\t{_github_link}\n")
 
     match_count = sum(1 for t, e in zipped if t.t_id == e)
     print('Expected GitHub numbers to match Trac ID: '
@@ -471,6 +468,9 @@ class GitHubRequest:
         https://docs.github.com/en/rest/reference/projects#create-a-project-column
         """
         name = self.milestone
+        if not name:
+            # Some tickets don't have a milestone.
+            return
 
         # Check whether we have already created the project.
         with open('projects_created.tsv') as f:
@@ -524,7 +524,11 @@ class GitHubRequest:
         API docs (very bad ones):
         https://docs.github.com/en/rest/reference/projects#create-a-project-card
         """
-        todo_id, done_id, rejected_id = self.getOrCreateProject()
+        column_ids = self.getOrCreateProject()
+        if not column_ids:
+            return
+
+        todo_id, done_id, rejected_id = column_ids
 
         # Set the column ID according to issue status and resolution.
         column_id = todo_id
