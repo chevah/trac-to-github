@@ -551,7 +551,39 @@ class TestNumberPredictor(unittest.TestCase):
         self.sut.next_numbers['trac-migration-staging'] = 1234
 
         self.assertEqual(
-            1234, self.sut.requestNextNumber('trac-migration-staging'))
+            1234, self.sut.requestNextNumber('trac-migration-staging', []))
+
+    def test_getMaxCreatedTicketNumber_match(self):
+        """
+        Returns the largest ticket number in the matching repository.
+        """
+        tickets = [
+            'https://github.com/chevah/matching/issues/1',
+            'https://github.com/chevah/matching/issues/2',
+            'https://github.com/matching/nonmatching/issues/3'
+            'https://github.com/matching/nonmatching/issues/4'
+            ]
+
+        self.assertEqual(
+            2,
+            self.sut.getMaxCreatedTicketNumber(
+                repo='matching', ticket_urls=tickets)
+            )
+
+    def test_getMaxCreatedTicketNumber_nomatch(self):
+        """
+        The max created ticket is 0 when there are no matches.
+        """
+        tickets = [
+            'https://github.com/chevah/nonmatching1/issues/1',
+            'https://github.com/chevah/nonmatching2/issues/2'
+            ]
+
+        self.assertEqual(
+            0,
+            self.sut.getMaxCreatedTicketNumber(
+                repo='matching', ticket_urls=tickets)
+            )
 
     @staticmethod
     def generateTickets(numbers):
@@ -573,7 +605,7 @@ class TestNumberPredictor(unittest.TestCase):
 
         self.assertEqual(
             (tickets, [1, 2, 3]),
-            self.sut.orderTickets(tickets)
+            self.sut.orderTickets(tickets, [])
             )
 
     def test_orderTickets_skip(self):
@@ -590,7 +622,7 @@ class TestNumberPredictor(unittest.TestCase):
                 self.generateTickets([4, 5, 6, 1, 2, 3]),
                 [4, 5, 6, 7, 8, 9],
                 ),
-            self.sut.orderTickets(tickets)
+            self.sut.orderTickets(tickets, [])
             )
 
     def test_orderTickets_unfillable_gap(self):
@@ -607,7 +639,7 @@ class TestNumberPredictor(unittest.TestCase):
                 self.generateTickets([17, 16, 15]),
                 [4, 5, 6],
                 ),
-            self.sut.orderTickets(tickets)
+            self.sut.orderTickets(tickets, [])
             )
 
     def test_orderTickets_gap_fillable_with_new(self):
@@ -621,7 +653,7 @@ class TestNumberPredictor(unittest.TestCase):
 
         self.assertEqual(
             (self.generateTickets([7, 5, 6]), [4, 5, 6]),
-            self.sut.orderTickets(tickets)
+            self.sut.orderTickets(tickets, [])
             )
 
     def test_orderTickets_gap_fillable_with_old(self):
@@ -638,7 +670,7 @@ class TestNumberPredictor(unittest.TestCase):
                 self.generateTickets([2, 8, 4, 10, 6]),
                 [7, 8, 9, 10, 11],
                 ),
-            self.sut.orderTickets(tickets)
+            self.sut.orderTickets(tickets, [])
             )
 
     def test_orderTickets_multiple_repos(self):
@@ -654,7 +686,7 @@ class TestNumberPredictor(unittest.TestCase):
             {'t_id': 17, 'component': 'trac-migration-staging'},
             ]
 
-        output, expected_github = self.sut.orderTickets(tickets)
+        output, expected_github = self.sut.orderTickets(tickets, [])
 
         commons_output = [t for t in output if t['component'] == 'commons']
         migration_output = [

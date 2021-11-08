@@ -42,18 +42,21 @@ DRY_RUN = True
 
 def main():
     """
-    Read the Trac DB and post the open tickets to GitHub.
+    Read the Trac DB and post the tickets to GitHub.
     """
-    tickets = list(select_tickets(read_trac_tickets()))
+    to_submit = list(select_tickets(read_trac_tickets()))
     comments = list(read_trac_comments())
+    submitted_already = get_tickets('tickets_created.tsv').values()
     np = NumberPredictor()
-    tickets, expected_numbers = np.orderTickets(tickets)
+    to_submit, expected_numbers = np.orderTickets(
+        to_submit, already_created=submitted_already
+        )
 
-    ticket_mapping = get_ticket_mapping(tickets, expected_numbers)
+    ticket_mapping = get_ticket_mapping(to_submit, expected_numbers)
 
     # Parse tickets into GitHub issue objects.
     issues = list(GitHubRequest.fromTracDataMultiple(
-        tickets, ticket_mapping=ticket_mapping
+        to_submit, ticket_mapping=ticket_mapping
         ))
 
     output_stats(issues, expected_numbers)
@@ -83,9 +86,9 @@ def select_tickets(tickets):
     submitted_ids = get_tickets().keys()
     tickets = [t for t in tickets if t['t_id'] not in submitted_ids]
 
+    # return [t for t in tickets if t['t_id'] == 35]
     # return [t for t in tickets if t['component'] == 'pr'] # DONE
     return [t for t in tickets if t['component'] == 'libs']
-    # return [t for t in tickets if t['t_id'] == 828]
     # return [t for t in tickets if t['component'] not in ['pr', 'libs']]
     return tickets
 
@@ -238,7 +241,7 @@ class NumberPredictor:
         """
         self.next_numbers = {}
 
-    def requestNextNumber(self, repo):
+    def requestNextNumber(self, repo, tickets_from_file):
         """
         Send GET requests for the latest issues and PRs,
         look at the largest number assigned so far, and increment by one.
@@ -250,11 +253,34 @@ class NumberPredictor:
 
         last_issue_number = self._requestMaxNumber(repo, 'issues')
         last_pull_number = self._requestMaxNumber(repo, 'pulls')
+        last_ticket_submitted = self.getMaxCreatedTicketNumber(
+            repo, tickets_from_file)
 
-        next_number = max(last_issue_number, last_pull_number) + 1
+        next_number = max(
+            last_issue_number, last_pull_number, last_ticket_submitted
+            ) + 1
         print(f"Next issue for {repo} will be {next_number}.")
 
         return next_number
+
+    @staticmethod
+    def getMaxCreatedTicketNumber(repo, ticket_urls):
+        """
+        Given a repository and a list of created GitHub issue URLs,
+        return the largest ticket number in that repository.
+        If no tickets match, return 0.
+        """
+        repo_urls = [
+            url for url in ticket_urls
+            if url.startswith(
+                f'https://github.com/{config.OWNER}/{repo}/issues/'
+                )
+            ]
+        repo_nums = [int(url.rsplit('/', 1)[1]) for url in repo_urls]
+
+        if not repo_nums:
+            return 0
+        return max(repo_nums)
 
     @staticmethod
     def _requestMaxNumber(repo, kind):
@@ -263,9 +289,6 @@ class NumberPredictor:
         `kind` is either "issues" or "pulls".
 
         By default GitHub orders them newest first.
-        Unfortunately, we can't use the `created_at` API because of this.
-        We'd have to check all the pages of issues to find out which has the
-        greatest number.
 
         Issue API docs:
         https://docs.github.com/en/rest/reference/issues#list-repository-issues
@@ -289,7 +312,7 @@ class NumberPredictor:
 
         return last_number
 
-    def orderTickets(self, tickets):
+    def orderTickets(self, tickets, already_created):
         """
         Choose an order to create tickets on GitHub so that we maximize
         matches of GitHub IDs with Trac IDs.
@@ -305,7 +328,8 @@ class NumberPredictor:
 
         for repo in unique(repositories):
             print('processing repo', repo)
-            self.next_numbers[repo] = self.requestNextNumber(repo)
+            self.next_numbers[repo] = self.requestNextNumber(
+                repo, already_created)
 
             tickets_by_id = {
                 t['t_id']: t
@@ -434,8 +458,7 @@ class GitHubRequest:
             }
         if assignees:
             self.data['assignee'] = assignees[0]
-        # Avoid using `created_at` due to it messing up requestNextNumber.
-        # self.data['created_at'] = created_at
+        self.data['created_at'] = created_at
         self.data['updated_at'] = updated_at
         if closed:
             # We are assuming closure is the last modification.
@@ -489,13 +512,16 @@ class GitHubRequest:
             if response.json()['status'] != 'imported':
                 response = debug_response(response)
 
-            with open('tickets_created.tsv', 'a') as f:
-                github_url = response.json()['issue_url']
-                f.write(f'{self.trac_url()}\t{github_url}\n')
-
             number = int(response.json()['issue_url'].rsplit('/', 1)[1])
             self.github_number = number
             print(f"Import {response.json()['id']} succeeded for #{number}.")
+
+            with open('tickets_created.tsv', 'a') as f:
+                github_url = (
+                    f'https://github.com/{self.owner}/{self.repo}/issues/'
+                    f'{self.github_number}'
+                    )
+                f.write(f'{self.trac_url()}\t{github_url}\n')
 
             if number != expected_number:
                 raise ValueError(
@@ -505,14 +531,8 @@ class GitHubRequest:
                     f"close the issue if needed, "
                     f"and then restart the script."
                     )
-
-            # Get the GitHub ID (not number), to post the issue to a project.
-            issue_url = (
-                f'https://api.github.com/repos/{self.owner}/{self.repo}/'
-                f'issues/{number}'
-                )
             response = protected_request(
-                url=issue_url,
+                url=response.json()['issue_url'],
                 data=None,
                 method=requests.get,
                 expected_status_code=200
