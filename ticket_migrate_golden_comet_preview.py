@@ -2,20 +2,6 @@
 # Migrate Trac tickets to GitHub.
 # Uses the Golden Comet preview API:
 # https://gist.github.com/jonmagic/5282384165e0f86ef105
-""""
-Start an issue import:
-
-curl -X POST -H "Authorization: token ${GITHUB_TOKEN}" \
-  -H "Accept: application/vnd.github.golden-comet-preview+json" \
-  -d '{"issue":{"title":"Fix broken widgets", "closed": true, "body":"- [ ] widget 1\n- [ ] widget 2","created_at":"2014-03-16T18:21:16Z"},"comments":[{"body":"Can we wrap this up soon?","created_at":"2014-03-16T17:15:42Z"}]}' \
-  https://api.github.com/repos/${GITHUB_USERNAME}/trac-migration-staging/import/issues
-
-Check status:
-
-curl -H "Authorization: token ${GITHUB_TOKEN}" \
-  -H "Accept: application/vnd.github.golden-comet-preview+json" \
-  https://api.github.com/repos/${GITHUB_USERNAME}/trac-migration-staging/import/issues/4237445
-"""
 
 import datetime
 import pprint
@@ -86,10 +72,11 @@ def select_tickets(tickets):
     submitted_ids = get_tickets().keys()
     tickets = [t for t in tickets if t['t_id'] not in submitted_ids]
 
-    # return [t for t in tickets if t['t_id'] == 35]
+    # return [t for t in tickets if t['t_id'] == 15]
     # return [t for t in tickets if t['component'] == 'pr'] # DONE
-    return [t for t in tickets if t['component'] == 'libs']
-    # return [t for t in tickets if t['component'] not in ['pr', 'libs']]
+    # return [t for t in tickets if t['component'] == 'webadmin'] # DONE
+    # return [t for t in tickets if t['component'] == 'libs'] # DONE
+    # return [t for t in tickets if t['component'] == 'infrastructure'] # DONE
     return tickets
 
 
@@ -458,7 +445,10 @@ class GitHubRequest:
             }
         if assignees:
             self.data['assignee'] = assignees[0]
-        self.data['created_at'] = created_at
+
+        # We used updated_at, because some tickets were repurposed,
+        # and it was more meaningful as the GitHub created_at.
+        self.data['created_at'] = updated_at
         self.data['updated_at'] = updated_at
         if closed:
             # We are assuming closure is the last modification.
@@ -501,6 +491,7 @@ class GitHubRequest:
 
             while response.json()['status'] == 'pending':
                 # Wait until our issue is created.
+                print('Waiting for import to finish...')
                 check_url = f'{url}/{self.github_import_id}'
                 response = protected_request(
                     url=check_url,
@@ -712,10 +703,10 @@ def protected_request(
         pprint.pprint(data)
         return
 
-    # Obey secondary rate limit:
+    # Import takes more than 0.2 seconds. Avoid checking excessively.
+    # Also, there may be a risk of secondary rate limit:
     # https://docs.github.com/en/rest/guides/best-practices-for-integrators#dealing-with-secondary-rate-limits
-    # If not using Golden Comet API, sleep 10 seconds here.
-    time.sleep(1)
+    time.sleep(0.2)
 
     response = method(
         url=url,
@@ -779,7 +770,7 @@ def get_body(description, data, ticket_mapping):
         pr_message = f"PR at {data['branch']}.\n"
 
     body = (
-        f"T{data['t_id']} {data['t_type']} was created by {reporter}"
+        f"trac-{data['t_id']} {data['t_type']} was created by {reporter}"
         f" on {showtime(data['time'])}.\n"
         f"{changed_message}"
         f"{pr_message}"
@@ -880,6 +871,23 @@ def labels_from_keywords(keywords: Union[str, None]):
         'tech-debt',
         'twisted',
         'ux',
+        'Adwords', 'Bing', 'PPC',
+        'brink',
+        'cdp',
+        'cisco',
+        'docker',
+        'Documentation',
+        'email',
+        'events',
+        'lets-encrypt',
+        'macos', 'bind',
+        'remote-manager',
+        'syslog',
+        'backup',
+        'vpn',
+        'file-server',
+        'website',
+        'windows', 'testing',
         }
     typo_fixes = {'tech-dept': 'tech-debt', 'tech-deb': 'tech-debt'}
 
