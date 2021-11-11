@@ -704,6 +704,8 @@ def protected_request(
         return
 
     # Import takes more than 0.2 seconds. Avoid checking excessively.
+    # There is a risk of GitHub reporting that the import job is done,
+    # but accessing the issue immediately after returns a 404.
     # Also, there may be a risk of secondary rate limit:
     # https://docs.github.com/en/rest/guides/best-practices-for-integrators#dealing-with-secondary-rate-limits
     time.sleep(0.2)
@@ -727,14 +729,12 @@ def protected_request(
 def debug_response(response):
     """
     Debug a response from a server.
-    Allow manually modifying the return value.
     """
     print(response)
     pprint.pprint(dict(response.headers))
     pprint.pprint(response.json())
     import pdb
     pdb.set_trace()
-    return response
 
 
 def wait_for_rate_reset(response):
