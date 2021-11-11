@@ -770,7 +770,7 @@ def get_body(description, data, ticket_mapping):
         pr_message = f"PR at {data['branch']}.\n"
 
     body = (
-        f"trac-{data['t_id']} {data['t_type']} was created by {reporter}"
+        f"trac-{data['t_id']} {data['t_type']} was created by @{reporter}"
         f" on {showtime(data['time'])}.\n"
         f"{changed_message}"
         f"{pr_message}"

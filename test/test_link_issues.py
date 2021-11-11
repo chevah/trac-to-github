@@ -133,8 +133,7 @@ class TestBody(unittest.TestCase):
         Writes Trac ticket details at the beginning of the description.
         """
         self.assertEqual(
-            "trac-12345 bug was created by @adiroiban on "
-            "1970-01-01 00:00:00Z.\n"
+            "trac-12345 bug was created by adiroiban on 1970-01-01 00:00:00Z.\n"
             "\n"
             "The ticket description.",
 
@@ -157,8 +156,7 @@ class TestBody(unittest.TestCase):
         Parses monospace squiggly brackets.
         """
         self.assertEqual(
-            "trac-5432 task was created by @someone_else on "
-            "1970-01-01 00:00:00Z.\n"
+            "trac-5432 task was created by someone_else on 1970-01-01 00:00:00Z.\n"
             "\n"
             "The ticket ```description```.",
 
@@ -517,7 +515,7 @@ class TestGitHubRequest(unittest.TestCase):
         self.assertEqual('some-milestone', request.milestone)
         self.assertEqual('summary', request.data['title'])
         self.assertEqual(
-            'trac-6 task was created by @adiroiban on 2010-11-04 15:04:51Z.\n'
+            'trac-6 task was created by adiroiban on 2010-11-04 15:04:51Z.\n'
             'Last changed on 2013-02-07 12:01:36Z.\n'
             'PR at https://github.com/chevah/agent-1.5/pull/10.\n'
             '\n'
