@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# Migrate Trac tickets to GitHub.
+# Migrate Trac tickets to GitHub, with the official (slow) API.
 import datetime
 import pprint
 import requests

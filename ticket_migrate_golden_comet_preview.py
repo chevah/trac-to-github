@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # Migrate Trac tickets to GitHub.
-# Uses the Golden Comet preview API:
+# Uses the Golden Comet preview (fast) API:
 # https://gist.github.com/jonmagic/5282384165e0f86ef105
 
 import datetime
