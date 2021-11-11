@@ -5,14 +5,18 @@ Hacks used to migrate from Trac sqlite or Postgresql dump to GitHub.
 
 Works with Python 3.8.
 
+# Wiki migration
+
 For wiki migration, you will need git available in your dev environment.
 
-This is a 2 stage process:
+This is a 3 stage process:
 
-1. Create the GitHub Wiki pages using content formated as TracWiki.
+1. Copy `config.py.sample` over `config.py`, and edit all the settings.
+
+2. Create the GitHub Wiki pages using content formated as TracWiki.
    This is done to have better diffs between historic versions.
 
-2. Convert the last version of the each page to ReStructuredText,
+3. Convert the last version of the each page to ReStructuredText,
    or to any other format.
 
 
@@ -58,3 +62,14 @@ Things that are not yet auto-converted:
 * Sub-pages listing macro `[[TitleIndex(Development/)]]`
 * Local table of content `[[PageOutline]]`
 * Manually create _Sidebar.rst and _Footer.rst GitHub wiki meta-pages.
+
+# Ticket migration
+
+1. Copy `config.py.sample` over `config.py`, and edit all the settings.
+2. Get the latest `projects_created.tsv` to avoid duplicating projects.
+3. Modify `select_tickets` to your liking.
+4. If you are sure you want to create tickets, change `DRY_RUN` to `False`
+   in `ticket_migrate.py`.
+5. Run `./ticket_migrate.py ../trac.db`, where `../trac.db` is the path
+   to the Trac SQLite DB dump.
+

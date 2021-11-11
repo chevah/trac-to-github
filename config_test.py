@@ -1,16 +1,12 @@
 # Trac User to GitHub user mapping.
+# This is the configuration used by the test suite.
+
 USER_MAPPING = {
     'adi': ('adiroiban', 'Adi Roiban <adi.roiban@chevah.com>'),
     'danuker': ('danuker', 'Dan Haiduc <danuthaiduc@gmail.com>'),
     }
 
 TRAC_TICKET_PREFIX = 'https://trac.chevah.com/ticket/'
-
-# None or a tuple of (name, email)
-# This is used for Trac user that don't have GitHub mapping.
-DEFAULT_GITHUB_USER = None
-
-FILE_EXTENSION = '.mediawiki'
 
 # Trac ticket Component to GitHub repository mapping.
 REPOSITORY_MAPPING = {
