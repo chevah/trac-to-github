@@ -3,6 +3,24 @@ import re
 import sys
 
 FIXME_REGEX = re.compile(r'FIXME:(\d+):')
+PROJECT_NAME = 'server'
+
+
+def should_skip_path(fpath):
+    """
+    Returns true if a path should be skipped instead of migrated.
+    """
+    if fpath.endswith('.pyc'):
+        return True
+
+    return any(substr in fpath for substr in [
+        '.git',
+        'node_modules',
+        'python2.7',
+        'nodeenv',
+        f'build-{PROJECT_NAME}',
+        'release-notes',
+        ])
 
 
 def replace_match(match, ticket_mapping):
@@ -38,21 +56,6 @@ def parse_tsv(project, tsv_text):
         }
 
 
-def path_to_skip(fpath):
-    """
-    Returns true if a path should be skipped instead of migrated.
-    """
-    return any(substr in fpath for substr in [
-        '.git/',
-        '.pyc',
-        'node_modules',
-        'python2.7',
-        'nodeenv',
-        'build-server',
-        'release-notes',
-        ])
-
-
 def main():
     """
     Perform FIXME in-place migration on a given directory.
@@ -60,18 +63,18 @@ def main():
     args = sys.argv[1:]
     if len(args) != 1:
         raise ValueError('There should be exactly one argument: '
-                         'the path to the directory to update.\n'
+                         'the path to the root directory to update.\n'
                          f'Provided: {args}')
 
     with open('tickets_created.tsv') as tickets_f:
         tsv_text = tickets_f.read()
-        mapping = parse_tsv(project='server', tsv_text=tsv_text)
+        mapping = parse_tsv(project=PROJECT_NAME, tsv_text=tsv_text)
 
         for root, dirs, fnames in os.walk(args[0]):
             for fname in fnames:
                 fpath = os.path.join(root, fname)
 
-                if path_to_skip(fpath):
+                if should_skip_path(fpath):
                     continue
 
                 try:
