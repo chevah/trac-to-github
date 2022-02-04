@@ -2,8 +2,9 @@ import os
 import re
 import sys
 
-FIXME_REGEX = re.compile(r'FIXME:(\d+):')
+# The GitHub name of the project we're working on.
 PROJECT_NAME = 'server'
+FIXME_REGEX = re.compile(r'FIXME:(\d+):')
 
 
 def should_skip_path(fpath):
@@ -28,9 +29,11 @@ def replace_match(match, ticket_mapping):
     try:
         return f'FIXME:{ticket_mapping[group]}:'
     except KeyError:
-        # print(f'Ticket ID not in this project: {group}')
-        # return f'FIXME:{group}:'
-        raise ValueError(f'Ticket ID not in this project: {group}')
+        if group in ticket_mapping.values():
+            print(f'Ticket ID may have been migrated: {group}')
+        else:
+            print(f'Ticket ID not in this project: {group}')
+        return f'FIXME:{group}:'
 
 
 def migrate(ticket_mapping, text):
@@ -83,7 +86,6 @@ def main():
                         new_source = migrate(mapping, source_code)
                     if source_code != new_source:
                         with open(fpath, 'w') as f:
-                            print(f'Updating {fpath}...')
                             f.write(new_source)
                 except UnicodeDecodeError:
                     # Likely a binary file. Skip it.

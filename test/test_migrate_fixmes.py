@@ -44,7 +44,7 @@ class TestMigration(unittest.TestCase):
 
     def test_fixme_unknown(self):
         """
-        Throws an error on an unknown FIXME.
+        A FIXME for a ticket not in the current project is not changed.
         """
         old_to_new = {'1234': '1235'}
         text = """
@@ -52,12 +52,7 @@ class TestMigration(unittest.TestCase):
             Some other text here.
             """
 
-        with self.assertRaises(ValueError) as error:
-            migrate(old_to_new, text)
-        self.assertEqual(
-            str(error.exception),
-            'Ticket ID not in this project: 1235'
-            )
+        self.assertEqual(migrate(old_to_new, text), text)
 
 
 class TestProjectFilter(unittest.TestCase):
