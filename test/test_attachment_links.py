@@ -1,10 +1,13 @@
 import unittest
-from attachment_links import trac_hash, get_path
+from attachment_links import trac_hash, get_attachment_path
 
 
 class TestTracToFilename(unittest.TestCase):
     def test_sha1_hash_ticket(self):
-        """A ticket ID can be hashed as string or integer."""
+        """
+        A ticket ID can be passed as string or integer,
+        and the string representation will be used for the Trac hash.
+        """
         self.assertEqual(
             trac_hash(5723),
             'de16c30ee166641da366bb04e3d0d53e0629adf6'
@@ -15,7 +18,7 @@ class TestTracToFilename(unittest.TestCase):
             )
 
     def test_sha1_hash_fname(self):
-        """A file path can be hashed."""
+        """A file name is hashed the same as Trac."""
         self.assertEqual(
             trac_hash('patch-for-5723.patch'),
             'd1f782bc26dd1d35bbb3bfe4be40cf7c2e27a781'
@@ -23,24 +26,26 @@ class TestTracToFilename(unittest.TestCase):
 
     def test_get_path(self):
         """
-        get_path matches the Trac attachment paths.
+        Match the Trac attachment paths.
 
-        Join the prefix of ticket ID hash, entire ticket ID hash,
-        and filename hash with slashes.
+        Join with slashes the following:
+        - ticket ID hash prefix,
+        - ticket ID hash, and
+        - filename hash.
         """
         self.assertEqual(
-            get_path('/prefix/', 5723, 'patch-for-5723.patch'),
+            get_attachment_path('/prefix/', 5723, 'patch-for-5723.patch'),
 
             '/prefix/de1/de16c30ee166641da366bb04e3d0d53e0629adf6/'
             'd1f782bc26dd1d35bbb3bfe4be40cf7c2e27a781'
             )
 
-    def test_get_path_no_slash_in_prefix(self):
+    def test_get_path_no_slash_in_root(self):
         """
-        get_path adds a slash at the end of the prefix when it is missing.
+        Adds a slash at the end of the root when it is missing.
         """
         self.assertEqual(
-            get_path('/prefix', 5723, 'patch-for-5723.patch'),
+            get_attachment_path('/prefix', 5723, 'patch-for-5723.patch'),
 
             '/prefix/de1/de16c30ee166641da366bb04e3d0d53e0629adf6/'
             'd1f782bc26dd1d35bbb3bfe4be40cf7c2e27a781'
