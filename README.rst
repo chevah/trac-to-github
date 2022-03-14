@@ -70,6 +70,8 @@ Things that are not yet auto-converted:
 3. Modify `select_tickets` to your liking.
 4. If you are sure you want to create tickets, change `DRY_RUN` to `False`
    in `ticket_migrate.py`.
-5. Run `./ticket_migrate.py ../trac.db`, where `../trac.db` is the path
+5. (Optional) - Dump and convert the Postgres DB to SQLite,
+   using `postgres-to-sqlite.sh`.
+6. Run `./ticket_migrate.py ../trac.db`, where `../trac.db` is the path
    to the Trac SQLite DB dump.
 
