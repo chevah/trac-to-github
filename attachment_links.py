@@ -14,9 +14,10 @@ def get_attachment_path(root, ticket_id, filename):
     into the Trac attachment path.
     """
     ticket_hash = trac_hash(ticket_id)
+    extension = filename.split('.')[-1]
     return (
-        root.rstrip('/') + '/' +
+        root.rstrip('/') + '/ticket/' +
         ticket_hash[:3] + '/' +
         ticket_hash + '/' +
-        trac_hash(filename)
+        trac_hash(filename) + f'.{extension}'
         )

@@ -32,6 +32,3 @@ do
 #  rm results_dump.sql && \
 #  rm results_dump.sql.original
 done
-
-
-

@@ -12,6 +12,7 @@ import time
 from collections import deque
 from typing import Union
 
+from attachment_links import get_attachment_path
 from wiki_trac_rst_convert import matches, sub
 
 try:
@@ -769,6 +770,16 @@ def get_body(description, data, ticket_mapping):
     if data['branch']:
         pr_message = f"PR at {data['branch']}.\n"
 
+    attachments_message = ''
+    if 'attachments' in data and data['attachments']:
+        attachment_links_message = format_attachments(
+            ticket_id=data['t_id'],
+            attachment_list=data['attachments'])
+        attachments_message = f"\n\n" \
+                              f"Attachments:\n" \
+                              f"\n" \
+                              f"{attachment_links_message}\n"
+
     body = (
         f"trac-{data['t_id']} {data['t_type']} was created by @{reporter}"
         f" on {showtime(data['time'])}.\n"
@@ -776,6 +787,7 @@ def get_body(description, data, ticket_mapping):
         f"{pr_message}"
         "\n"
         f"{parse_body(description, ticket_mapping)}"
+        f"{attachments_message}"
         )
 
     return body
@@ -924,6 +936,22 @@ def labels_from_status_and_resolution(status, resolution):
         return {status.replace('_', '-')}
 
     return set()
+
+
+def format_attachments(ticket_id, attachment_list):
+    """
+    Convert attachment data into a human-readable markdown list.
+    """
+    return '\n'.join(
+        f"* "
+        f"[{attachment['filename']}]"
+        f"({get_attachment_path(config.ATTACHMENT_ROOT, ticket_id, attachment['filename'])})"
+        f" ({attachment['size']} bytes) - "
+        f"added by {attachment['author']} "
+        f"on {showtime(int(attachment['time']))} - "
+        f"{attachment['description']}"
+        for attachment in sorted(attachment_list, key=lambda a: a['time'])
+        )
 
 
 def parse_body(description, ticket_mapping):

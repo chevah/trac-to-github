@@ -36,8 +36,8 @@ class TestTracToFilename(unittest.TestCase):
         self.assertEqual(
             get_attachment_path('/prefix/', 5723, 'patch-for-5723.patch'),
 
-            '/prefix/de1/de16c30ee166641da366bb04e3d0d53e0629adf6/'
-            'd1f782bc26dd1d35bbb3bfe4be40cf7c2e27a781'
+            '/prefix/ticket/de1/de16c30ee166641da366bb04e3d0d53e0629adf6/'
+            'd1f782bc26dd1d35bbb3bfe4be40cf7c2e27a781.patch'
             )
 
     def test_get_path_no_slash_in_root(self):
@@ -47,6 +47,6 @@ class TestTracToFilename(unittest.TestCase):
         self.assertEqual(
             get_attachment_path('/prefix', 5723, 'patch-for-5723.patch'),
 
-            '/prefix/de1/de16c30ee166641da366bb04e3d0d53e0629adf6/'
-            'd1f782bc26dd1d35bbb3bfe4be40cf7c2e27a781'
+            '/prefix/ticket/de1/de16c30ee166641da366bb04e3d0d53e0629adf6/'
+            'd1f782bc26dd1d35bbb3bfe4be40cf7c2e27a781.patch'
             )
