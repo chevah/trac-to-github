@@ -9,9 +9,10 @@ import requests
 import sqlite3
 import sys
 import time
-from collections import deque
+from collections import deque, defaultdict
 from typing import Union
 
+from attachment_links import get_attachment_path
 from wiki_trac_rst_convert import matches, sub
 
 try:
@@ -26,6 +27,18 @@ from trac2down import convert
 DRY_RUN = True
 
 
+def attach_attachments(tickets, attachments):
+    """
+    Augment each ticket entry with a list of its attachments.
+    """
+    tickets_to_attachments = defaultdict(lambda: [])
+    for a in attachments:
+        tickets_to_attachments[a['t_id']].append(a)
+
+    for t in tickets:
+        t['attachments'] = tickets_to_attachments[str(t['t_id'])]
+
+
 def main():
     """
     Read the Trac DB and post the tickets to GitHub.
@@ -34,6 +47,7 @@ def main():
     comments = list(read_trac_comments())
     submitted_already = get_tickets('tickets_created.tsv').values()
     np = NumberPredictor()
+    attach_attachments(tickets=to_submit, attachments=read_trac_attachments())
     to_submit, expected_numbers = np.orderTickets(
         to_submit, already_created=submitted_already
         )
@@ -72,11 +86,7 @@ def select_tickets(tickets):
     submitted_ids = get_tickets().keys()
     tickets = [t for t in tickets if t['t_id'] not in submitted_ids]
 
-    # return [t for t in tickets if t['t_id'] == 15]
-    # return [t for t in tickets if t['component'] == 'pr'] # DONE
-    # return [t for t in tickets if t['component'] == 'webadmin'] # DONE
-    # return [t for t in tickets if t['component'] == 'libs'] # DONE
-    # return [t for t in tickets if t['component'] == 'infrastructure'] # DONE
+    # return [t for t in tickets if t['t_id'] == 4419]
     return tickets
 
 
@@ -207,6 +217,25 @@ def read_trac_comments():
                 }
 
 
+def read_trac_attachments():
+    """
+    Read the Trac attachment data from the database.
+    """
+    db = get_db()
+    for row in db.execute(
+            "SELECT * FROM attachment;"):
+        att_type, t_id, filename, size, time, description, author, ipnr = row
+
+        yield {
+            't_id': t_id,
+            'filename': filename,
+            'size': size,
+            'time': time,
+            'description': description,
+            'author': author,
+            }
+
+
 def get_db():
     """
     Return a database connection.
@@ -293,7 +322,11 @@ class NumberPredictor:
         except IndexError:
             last_number = 0
         except KeyError:
-            raise KeyError(f"Couldn't get tickets from {config.OWNER}/{repo}.")
+            raise KeyError(
+                f"Couldn't get tickets from {config.OWNER}/{repo}.\n"
+                f"Response from server:\n{tickets_or_pulls.json()}\n"
+                f'Note: a "not found" response may mean an expired token.'
+                )
 
         wait_for_rate_reset(tickets_or_pulls)
 
@@ -769,6 +802,16 @@ def get_body(description, data, ticket_mapping):
     if data['branch']:
         pr_message = f"PR at {data['branch']}.\n"
 
+    attachments_message = ''
+    if 'attachments' in data and data['attachments']:
+        attachment_links_message = format_attachments(
+            ticket_id=data['t_id'],
+            attachment_list=data['attachments'])
+        attachments_message = f"\n\n" \
+                              f"Attachments:\n" \
+                              f"\n" \
+                              f"{attachment_links_message}\n"
+
     body = (
         f"trac-{data['t_id']} {data['t_type']} was created by @{reporter}"
         f" on {showtime(data['time'])}.\n"
@@ -776,6 +819,7 @@ def get_body(description, data, ticket_mapping):
         f"{pr_message}"
         "\n"
         f"{parse_body(description, ticket_mapping)}"
+        f"{attachments_message}"
         )
 
     return body
@@ -924,6 +968,22 @@ def labels_from_status_and_resolution(status, resolution):
         return {status.replace('_', '-')}
 
     return set()
+
+
+def format_attachments(ticket_id, attachment_list):
+    """
+    Convert attachment data into a human-readable markdown list.
+    """
+    return '\n'.join(
+        f"* "
+        f"[{attachment['filename']}]"
+        f"({get_attachment_path(config.ATTACHMENT_ROOT, ticket_id, attachment['filename'])})"
+        f" ({attachment['size']} bytes) - "
+        f"added by {attachment['author']} "
+        f"on {showtime(int(attachment['time']))} - "
+        f"{attachment['description']}"
+        for attachment in sorted(attachment_list, key=lambda a: a['time'])
+        )
 
 
 def parse_body(description, ticket_mapping):

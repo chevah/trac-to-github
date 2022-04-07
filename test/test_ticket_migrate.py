@@ -152,6 +152,61 @@ class TestBody(unittest.TestCase):
                 )
             )
 
+    def test_get_body_attachments(self):
+        """
+        When the ticket data includes attachments,
+        """
+        self.assertEqual(
+            "trac-4419 bug was created by @adiroiban on "
+            "1970-01-01 00:00:00Z.\n"
+            "\n"
+            "The ticket description.\n"
+            "\n"
+            "Attachments:\n"
+            "\n"
+            
+            "* [issue4419.diff]"
+            "(https://site.com/trunk/ticket/35c/35ccaee7c6ad5b60087406a818a6e0602a2a771f/8519e6a3f1bcc3fe97ba41d9367a62b3d1636845.diff)"
+            " (552 bytes) - "
+            "added by author_nickname on 2011-10-22 06:47:13Z - "
+            "\n"
+            
+            "* [0001-Make-IRCClient.noticed-empty-by-default-to-avoid-loo.patch]"
+            "(https://site.com/trunk/ticket/35c/35ccaee7c6ad5b60087406a818a6e0602a2a771f/e3090ff2b269e2f0b4c2e1dfacdb7ecadb36a47b.patch) "
+            "(12345 bytes) - "
+            "added by author_nickname2 on 2011-10-22 06:47:14Z - "
+            "Simpler patch that just blanks the noticed() implementation\n",
+
+            tm.get_body(
+                "The ticket description.",
+                data={
+                    't_id': 4419,
+                    't_type': 'bug',
+                    'reporter': 'adi',
+                    'time': 1234,
+                    'changetime': 1234,
+                    'branch': None,
+                    'attachments': (
+                        {
+                            'filename': '0001-Make-IRCClient.noticed-empty-by-default-to-avoid-loo.patch',
+                            'size': '12345',
+                            'time': '1319266034000000',
+                            'description': 'Simpler patch that just blanks the noticed() implementation',
+                            'author': 'author_nickname2',
+                            },
+                        {
+                            'filename': 'issue4419.diff',
+                            'size': '552',
+                            'time': '1319266033000000', # 2011-10-22 06:47:13Z
+                            'description': '',
+                            'author': 'author_nickname',
+                            },
+                        )
+                    },
+                ticket_mapping={},
+                )
+            )
+
     def test_get_body_monospace(self):
         """
         Parses monospace squiggly brackets.

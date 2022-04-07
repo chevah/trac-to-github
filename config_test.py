@@ -21,6 +21,9 @@ FALLBACK_REPOSITORY = 'server'
 # Owner of GitHub repositories where to create issues.
 OWNER = 'chevah'
 
+# The root URL of the attachment files, containing the ticket/ and wiki/ dirs.
+ATTACHMENT_ROOT = 'https://site.com/trunk/'
+
 # The user to create the issues through the API.
 # Create a token with `repo` permissions here:
 # https://github.com/settings/tokens
