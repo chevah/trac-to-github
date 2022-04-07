@@ -322,7 +322,11 @@ class NumberPredictor:
         except IndexError:
             last_number = 0
         except KeyError:
-            raise KeyError(f"Couldn't get tickets from {config.OWNER}/{repo}.")
+            raise KeyError(
+                f"Couldn't get tickets from {config.OWNER}/{repo}.\n"
+                f"Response from server:\n{tickets_or_pulls.json()}\n"
+                f'Note: a "not found" response may mean an expired token.'
+                )
 
         wait_for_rate_reset(tickets_or_pulls)
 

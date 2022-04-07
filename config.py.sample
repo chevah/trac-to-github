@@ -7,9 +7,10 @@ USER_MAPPING = {
 TRAC_TICKET_PREFIX = 'https://trac.chevah.com/ticket/'
 
 # None or a tuple of (name, email)
-# This is used for Trac user that don't have GitHub mapping.
+# This is used for Trac users that don't have GitHub mapping.
 DEFAULT_GITHUB_USER = None
 
+# Wiki page file extension.
 FILE_EXTENSION = '.mediawiki'
 
 # Trac ticket Component to GitHub repository mapping.
