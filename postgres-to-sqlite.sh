@@ -1,4 +1,6 @@
 #!/bin/bash
+# Tool to dump the Trac PostgreSQL database,
+# and convert it to an SQLite-importable format.
 # Adapted from: https://stackoverflow.com/a/56040892
 DBNAME=trac
 
