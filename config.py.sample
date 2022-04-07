@@ -25,6 +25,9 @@ FALLBACK_REPOSITORY = 'server'
 # Owner of GitHub repositories where to create issues.
 OWNER = 'chevah'
 
+# Organization to add projects in.
+PROJECT_ORG = 'SHOULD REMOVE PROJECTS'
+
 # The root URL of the attachment files, containing the ticket/ and wiki/ dirs.
 ATTACHMENT_ROOT = 'https://raw.githubusercontent.com/twisted/twistedmatrix.com-trac-attachments/trunk/'
 

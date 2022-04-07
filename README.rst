@@ -66,12 +66,26 @@ Things that are not yet auto-converted:
 # Ticket migration
 
 1. Copy `config.py.sample` over `config.py`, and edit all the settings.
+   Perhaps use a fake `OAUTH_TOKEN` to avoid accidental changes.
 2. Get the latest `projects_created.tsv` to avoid duplicating projects.
-3. Modify `select_tickets` to your liking.
-4. If you are sure you want to create tickets, change `DRY_RUN` to `False`
+3. Create required files:
+   `touch tickets_created.tsv && touch tickets_expected_gold.tsv`
+4. Modify `select_tickets` to your liking.
+   Perform a dry run, generating `tickets_expected.tsv`.
+5. Once the system generated the desired `tickets_expected.tsv`,
+   overwrite `tickets_expected_gold.tsv` with it,
+   to make sure the IDs remain stable.
+6. Run a DRY RUN once more, checking for "Warning: unknown ticket:" messages.
+   There should be none, if all required tickets are
+   in `tickets_expected_gold.tsv`.
+7. If you are sure you want to create tickets, change `DRY_RUN` to `False`
    in `ticket_migrate.py`.
-5. (Optional) - Dump and convert the Postgres DB to SQLite,
+8. (Optional) - Dump and convert the Postgres DB to SQLite,
    using `postgres-to-sqlite.sh`.
-6. Run `./ticket_migrate.py ../trac.db`, where `../trac.db` is the path
+9. Run `./ticket_migrate.py ../trac.db`, where `../trac.db` is the path
    to the Trac SQLite DB dump.
 
+In the event a new ticket is created while the script is running,
+you must manually add a fake entry to `tickets_created.tsv` so that,
+on retrying, as much as possible of `tickets_expected.tsv` still matches
+`tickets_expected_gold.tsv`.

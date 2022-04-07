@@ -9,7 +9,7 @@ import requests
 import sqlite3
 import sys
 import time
-from collections import deque
+from collections import deque, defaultdict
 from typing import Union
 
 from attachment_links import get_attachment_path
@@ -27,6 +27,18 @@ from trac2down import convert
 DRY_RUN = True
 
 
+def attach_attachments(tickets, attachments):
+    """
+    Augment each ticket entry with a list of its attachments.
+    """
+    tickets_to_attachments = defaultdict(lambda: [])
+    for a in attachments:
+        tickets_to_attachments[a['t_id']].append(a)
+
+    for t in tickets:
+        t['attachments'] = tickets_to_attachments[str(t['t_id'])]
+
+
 def main():
     """
     Read the Trac DB and post the tickets to GitHub.
@@ -35,6 +47,7 @@ def main():
     comments = list(read_trac_comments())
     submitted_already = get_tickets('tickets_created.tsv').values()
     np = NumberPredictor()
+    attach_attachments(tickets=to_submit, attachments=read_trac_attachments())
     to_submit, expected_numbers = np.orderTickets(
         to_submit, already_created=submitted_already
         )
@@ -73,11 +86,7 @@ def select_tickets(tickets):
     submitted_ids = get_tickets().keys()
     tickets = [t for t in tickets if t['t_id'] not in submitted_ids]
 
-    # return [t for t in tickets if t['t_id'] == 15]
-    # return [t for t in tickets if t['component'] == 'pr'] # DONE
-    # return [t for t in tickets if t['component'] == 'webadmin'] # DONE
-    # return [t for t in tickets if t['component'] == 'libs'] # DONE
-    # return [t for t in tickets if t['component'] == 'infrastructure'] # DONE
+    # return [t for t in tickets if t['t_id'] == 4419]
     return tickets
 
 
@@ -206,6 +215,25 @@ def read_trac_comments():
                 'oldvalue': oldvalue,
                 'newvalue': newvalue,
                 }
+
+
+def read_trac_attachments():
+    """
+    Read the Trac attachment data from the database.
+    """
+    db = get_db()
+    for row in db.execute(
+            "SELECT * FROM attachment;"):
+        att_type, t_id, filename, size, time, description, author, ipnr = row
+
+        yield {
+            't_id': t_id,
+            'filename': filename,
+            'size': size,
+            'time': time,
+            'description': description,
+            'author': author,
+            }
 
 
 def get_db():
