@@ -5,6 +5,7 @@
 
 import datetime
 import pprint
+import re
 import requests
 import sqlite3
 import sys
@@ -798,9 +799,9 @@ def get_body(description, data, ticket_mapping):
     if data['changetime'] != data['time']:
         changed_message = f"Last changed on {showtime(data['changetime'])}.\n"
 
-    pr_message = ''
+    branch_message = ''
     if data['branch']:
-        pr_message = f"PR at {data['branch']}.\n"
+        branch_message = f"Branch at {data['branch']}.\n"
 
     attachments_message = ''
     if 'attachments' in data and data['attachments']:
@@ -810,16 +811,17 @@ def get_body(description, data, ticket_mapping):
         attachments_message = f"\n\n" \
                               f"Attachments:\n" \
                               f"\n" \
-                              f"{attachment_links_message}\n"
+                              f"{attachment_links_message}"
 
     body = (
         f"trac-{data['t_id']} {data['t_type']} was created by @{reporter}"
         f" on {showtime(data['time'])}.\n"
         f"{changed_message}"
-        f"{pr_message}"
+        f"{branch_message}"
         "\n"
         f"{parse_body(description, ticket_mapping)}"
         f"{attachments_message}"
+        f"{format_metadata(data)}"
         )
 
     return body
@@ -983,6 +985,47 @@ def format_attachments(ticket_id, attachment_list):
         f"on {showtime(int(attachment['time']))} - "
         f"{attachment['description']}"
         for attachment in sorted(attachment_list, key=lambda a: a['time'])
+        )
+
+
+def format_metadata(ticket_data):
+    """
+    Output a machine-readable section out of the ticket data.
+    """
+    fields = (
+        't_id t_type author reporter priority milestone branch status '
+        'component keywords cc time changetime owner version'
+        )
+
+    def rename(field):
+        mappings = {'t_id': 'trac-id', 't_type': 'type'}
+        return mappings.get(field, field)
+
+    def process(value):
+        """
+        Replace everything with underscores, for GitHub searchability.
+        Then append the original value, to preserve meaning.
+        """
+        original = value
+        value = re.sub('[^a-zA-Z0-9]', '_', str(original))
+        return f'{value} {original}'
+
+    renamed_data = {
+        rename(k): process(ticket_data[k])
+        for k in fields.split()
+        }
+
+    formatted = '\n'.join(f'{k}__{v}' for k, v in renamed_data.items())
+
+    return (
+        '\n'
+        '\n'
+        '<details><summary>Searchable metadata</summary>\n'
+        '\n'
+        '```\n'
+        f'{formatted}\n'
+        '```\n'
+        '</details>\n'
         )
 
 

@@ -130,37 +130,21 @@ class TestBody(unittest.TestCase):
     """
     def test_get_body_details(self):
         """
-        Writes Trac ticket details at the beginning of the description.
-        """
-        self.assertEqual(
-            "trac-12345 bug was created by @adiroiban on "
-            "1970-01-01 00:00:00Z.\n"
-            "\n"
-            "The ticket description.",
+        Writes Trac ticket details at the beginning of the description,
+        then the description and attachments if any,
+        then machine-readable details at the end.
 
-            tm.get_body(
-                "The ticket description.",
-                {
-                    't_id': 12345,
-                    't_type': 'bug',
-                    'reporter': 'adi',
-                    'time': 1234,
-                    'changetime': 1234,
-                    'branch': None,
-                    },
-                ticket_mapping={},
-                )
-            )
+        This is a "golden test" which covers all features.
+        """
+        self.maxDiff = 10000
 
-    def test_get_body_attachments(self):
-        """
-        When the ticket data includes attachments,
-        """
         self.assertEqual(
-            "trac-4419 bug was created by @adiroiban on "
-            "1970-01-01 00:00:00Z.\n"
+            "trac-4419 release blocker: release process bug"
+            " was created by @adiroiban on 1970-01-01 00:00:00Z.\n"
+            "Last changed on 1970-01-01 00:20:36Z.\n"
+            "Branch at 4419-some-branch-somewhere.\n"
             "\n"
-            "The ticket description.\n"
+            "The ticket description. Some ```monospaced``` text.\n"
             "\n"
             "Attachments:\n"
             "\n"
@@ -175,17 +159,47 @@ class TestBody(unittest.TestCase):
             "(https://site.com/trunk/ticket/35c/35ccaee7c6ad5b60087406a818a6e0602a2a771f/e3090ff2b269e2f0b4c2e1dfacdb7ecadb36a47b.patch) "
             "(12345 bytes) - "
             "added by author_nickname2 on 2011-10-22 06:47:14Z - "
-            "Simpler patch that just blanks the noticed() implementation\n",
+            "Simpler patch that just blanks the noticed() implementation\n"
+            "\n"
+            "<details><summary>Searchable metadata</summary>\n"
+            "\n"
+            "```\n"
+            "trac-id__4419 4419\n"
+            "type__release_blocker__release_process_bug release blocker: release process bug\n"
+            "author__some_author some-author\n"
+            "reporter__adi adi\n"
+            "priority__some_priority some-priority\n"
+            "milestone__some_milestone some-milestone\n"
+            "branch__4419_some_branch_somewhere 4419-some-branch-somewhere\n"
+            "status__some_status some-status\n"
+            "component__some_component some-component\n"
+            "keywords__some_keywords some-keywords\n"
+            "cc__some_cc some-cc\n"
+            "time__1234 1234\n"
+            "changetime__1236000000 1236000000\n"
+            "owner__some_owner some-owner\n"
+            "version__some_version some-version\n"
+            "```\n"
+            "</details>\n",
 
             tm.get_body(
-                "The ticket description.",
-                data={
+                "The ticket description. Some {{{monospaced}}} text.",
+                {
                     't_id': 4419,
-                    't_type': 'bug',
+                    't_type': 'release blocker: release process bug',
                     'reporter': 'adi',
                     'time': 1234,
-                    'changetime': 1234,
-                    'branch': None,
+                    'changetime': 1236000000,
+                    'branch': '4419-some-branch-somewhere',
+                    'author': 'some-author',
+                    'priority': 'some-priority',
+                    'milestone': 'some-milestone',
+                    'status': 'some-status',
+                    'component': 'some-component',
+                    'keywords': 'some-keywords',
+                    'cc': 'some-cc',
+                    'owner': 'some-owner',
+                    'version': 'some-version',
                     'attachments': (
                         {
                             'filename': '0001-Make-IRCClient.noticed-empty-by-default-to-avoid-loo.patch',
@@ -202,30 +216,6 @@ class TestBody(unittest.TestCase):
                             'author': 'author_nickname',
                             },
                         )
-                    },
-                ticket_mapping={},
-                )
-            )
-
-    def test_get_body_monospace(self):
-        """
-        Parses monospace squiggly brackets.
-        """
-        self.assertEqual(
-            "trac-5432 task was created by @someone_else on "
-            "1970-01-01 00:00:00Z.\n"
-            "\n"
-            "The ticket ```description```.",
-
-            tm.get_body(
-                "The ticket {{{description}}}.",
-                {
-                    't_id': 5432,
-                    't_type': 'task',
-                    'reporter': 'someone_else',
-                    'time': 1234,
-                    'changetime': 1234,
-                    'branch': ''
                     },
                 ticket_mapping={},
                 )
