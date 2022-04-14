@@ -28,18 +28,6 @@ from trac2down import convert
 DRY_RUN = True
 
 
-def attach_attachments(tickets, attachments):
-    """
-    Augment each ticket entry with a list of its attachments.
-    """
-    tickets_to_attachments = defaultdict(lambda: [])
-    for a in attachments:
-        tickets_to_attachments[a['t_id']].append(a)
-
-    for t in tickets:
-        t['attachments'] = tickets_to_attachments[str(t['t_id'])]
-
-
 def main():
     """
     Read the Trac DB and post the tickets to GitHub.
@@ -87,7 +75,7 @@ def select_tickets(tickets):
     submitted_ids = get_tickets().keys()
     tickets = [t for t in tickets if t['t_id'] not in submitted_ids]
 
-    # return [t for t in tickets if t['t_id'] == 4419]
+    return [t for t in tickets if t['t_id'] in [78, 4419, 7827]]
     return tickets
 
 
@@ -106,7 +94,7 @@ def get_ticket_mapping(tickets, expected_numbers):
 
 def get_tickets(filename='tickets_created.tsv'):
     """
-    Reads the tickets_create.tsv, and returns a dictionary of
+    Reads the tickets_created.tsv, and returns a dictionary of
     Trac ID -> GitHub URL of tickets that were sent to GitHub already.
     """
     created_tickets = {}
@@ -126,24 +114,27 @@ def read_trac_tickets():
     """
     db = get_db()
 
-    # Only take the last branch change.
-    # For example, https://trac.chevah.com/ticket/85 has multiple changes,
-    # and the last one is to GH PR 238.
-    # We use GROUP BY because SQLite has no DISTINCT ON.
+    # Select the last change for `branch` and `branch_author`.
+    # In SQLite, there is no DISTINCT ON respecting order,
+    # but max(time) forces the other row fields to be the most up to date.
     # https://www.sqlite.org/quirks.html#aggregate_queries_can_contain_non_aggregate_result_columns_that_are_not_in_the_group_by_clause
-    for row in db.execute(
-            """\
-            SELECT *
-            FROM
-              (SELECT *
-               FROM ticket
-               LEFT JOIN ticket_change ON ticket.id = ticket_change.ticket
-               AND ticket_change.field = 'branch'
-               AND ticket_change.newvalue LIKE '%github%'
-               ORDER BY ticket.id,
-                        ticket_change.time DESC)
-            GROUP BY id;
-            """):
+    ticket_branches = {}
+    ticket_branch_authors ={}
+    for changerow in db.execute(
+            """
+            SELECT max(time), ticket, field, newvalue 
+            FROM ticket_change 
+            WHERE field in ('branch', 'branch_author') 
+            GROUP BY ticket, field;
+            """
+            ):
+        changetime, change_ticketid, field, value = changerow
+        if field == 'branch':
+            ticket_branches[change_ticketid] = value
+        if field == 'branch_author':
+            ticket_branch_authors[change_ticketid] = value
+
+    for row in db.execute("SELECT * FROM ticket;"):
         (
             t_id,
             t_type,
@@ -162,12 +153,6 @@ def read_trac_tickets():
             summary,
             description,
             keywords,
-            _ticket,
-            _time,
-            _author,
-            _field,
-            _oldvalue,
-            _newvalue,
             ) = row
 
         yield {
@@ -188,7 +173,8 @@ def read_trac_tickets():
             'summary': summary,
             'description': description,
             'keywords': keywords,
-            'branch': _newvalue,
+            'branch': ticket_branches.get(t_id, ''),
+            'branch_author': ticket_branch_authors.get(t_id, ''),
             }
 
 
@@ -235,6 +221,18 @@ def read_trac_attachments():
             'description': description,
             'author': author,
             }
+
+
+def attach_attachments(tickets, attachments):
+    """
+    Augment each ticket entry with a list of its attachments.
+    """
+    tickets_to_attachments = defaultdict(lambda: [])
+    for a in attachments:
+        tickets_to_attachments[a['t_id']].append(a)
+
+    for t in tickets:
+        t['attachments'] = tickets_to_attachments[str(t['t_id'])]
 
 
 def get_db():
@@ -661,12 +659,6 @@ class GitHubRequest:
     @classmethod
     def fromTracData(
             cls,
-            component,
-            owner,
-            summary,
-            description,
-            priority,
-            keywords,
             ticket_mapping,
             **kwargs):
         """
@@ -674,22 +666,25 @@ class GitHubRequest:
         """
         return cls(
             owner=config.OWNER,
-            repo=get_repo(component),
+            repo=get_repo(kwargs['component']),
             trac_id=kwargs['t_id'],
-            title=summary,
+            title=kwargs['summary'],
             body=get_body(
-                description, data=kwargs, ticket_mapping=ticket_mapping),
+                kwargs['description'],
+                data=kwargs,
+                ticket_mapping=ticket_mapping
+                ),
             closed=kwargs['status'] == 'closed',
             resolution=kwargs['resolution'],
             milestone=kwargs['milestone'],
             labels=get_labels(
-                component,
-                priority,
-                keywords,
+                kwargs['component'],
+                kwargs['priority'],
+                kwargs['keywords'],
                 kwargs['status'],
                 kwargs['resolution']
                 ),
-            assignees=get_assignees(owner),
+            assignees=get_assignees(kwargs['owner']),
             created_at=isotime(kwargs['time']),
             updated_at=isotime(kwargs['changetime'])
             )
@@ -897,53 +892,12 @@ def labels_from_keywords(keywords: Union[str, None]):
     Given the Trac `keywords` string, clean it up and parse it into a list.
     """
     if keywords is None:
-        return set()
+        return []
 
-    keywords = keywords.replace(',', '')
+    keywords = keywords.replace(',', ' ')
     keywords = keywords.split(' ')
 
-    allowed_keyword_labels = {
-        'design',
-        'easy',
-        'feature',
-        'happy-hacking',
-        'onboarding',
-        'password-management',
-        'perf-test',
-        'remote-management',
-        'salt',
-        'scp',
-        'security',
-        'tech-debt',
-        'twisted',
-        'ux',
-        'Adwords', 'Bing', 'PPC',
-        'brink',
-        'cdp',
-        'cisco',
-        'docker',
-        'Documentation',
-        'email',
-        'events',
-        'lets-encrypt',
-        'macos', 'bind',
-        'remote-manager',
-        'syslog',
-        'backup',
-        'vpn',
-        'file-server',
-        'website',
-        'windows', 'testing',
-        }
-    typo_fixes = {'tech-dept': 'tech-debt', 'tech-deb': 'tech-debt'}
-
-    keywords = [typo_fixes.get(kw, kw) for kw in keywords if kw]
-    discarded = [kw for kw in keywords if kw not in allowed_keyword_labels]
-
-    if discarded:
-        print("Warning: discarded keywords:", discarded)
-
-    return {kw for kw in keywords if kw in allowed_keyword_labels}
+    return [kw for kw in keywords if kw]
 
 
 def labels_from_priority(priority):
@@ -993,8 +947,21 @@ def format_metadata(ticket_data):
     Output a machine-readable section out of the ticket data.
     """
     fields = (
-        't_id t_type author reporter priority milestone branch status '
-        'component keywords cc time changetime owner version'
+        't_id '
+        't_type '
+        'reporter '
+        'priority '
+        'milestone '
+        'branch '
+        'branch_author '
+        'status '
+        'component '
+        'keywords '
+        'cc '
+        'time '
+        'changetime '
+        'owner '
+        'version'
         )
 
     def rename(field):

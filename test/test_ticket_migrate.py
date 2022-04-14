@@ -37,39 +37,35 @@ class TestLabelMapping(unittest.TestCase):
         """
         Parse and clean the Trac keywords.
         """
-        # Split by space.
+        # Split by space or comma.
         self.assertEqual(
-            {'easy', 'tech-debt'},
+            ['easy', 'tech-debt'],
             tm.labels_from_keywords('easy tech-debt'))
+        self.assertEqual(
+            ['easy', 'tech-debt'],
+            tm.labels_from_keywords('easy,tech-debt'))
 
         # Remove commas.
-        self.assertEqual({'tech-debt'}, tm.labels_from_keywords('tech-debt,'))
+        self.assertEqual(['tech-debt'], tm.labels_from_keywords('tech-debt,'))
         self.assertEqual(
-            {'tech-debt', 'feature'},
+            ['tech-debt', 'feature'],
             tm.labels_from_keywords('tech-debt, feature'))
-
-        # Fix typos.
-        self.assertEqual(
-            {'tech-debt', 'easy'},
-            tm.labels_from_keywords('tech-dept easy'))
-        self.assertEqual(
-            {'tech-debt'},
-            tm.labels_from_keywords('tech-deb'))
-
-        # Discard unknown words to prevent tag explosion.
-        self.assertEqual(
-            set(),
-            tm.labels_from_keywords('unknown-tag'))
-
-        # Deduplicate.
-        self.assertEqual(
-            {'tech-debt'},
-            tm.labels_from_keywords('tech-deb, tech-debt tech-dept'))
 
         # Handles None correctly.
         self.assertEqual(
-            set(),
+            [],
             tm.labels_from_keywords(None))
+
+        # Handles empty tags correctly.
+        self.assertEqual(
+            [],
+            tm.labels_from_keywords(''))
+        self.assertEqual(
+            [],
+            tm.labels_from_keywords(', , ,,  '))
+        self.assertEqual(
+            ['tag', 'tag', 'tag'],
+            tm.labels_from_keywords('tag, ,tag ,,tag  '))
 
     def test_get_labels_none(self):
         """
@@ -81,7 +77,7 @@ class TestLabelMapping(unittest.TestCase):
             tm.get_labels(
                 component='client',
                 priority='Low',
-                keywords='tech-dept',
+                keywords='tech-debt',
                 status='',
                 resolution='',
                 ))
@@ -166,11 +162,11 @@ class TestBody(unittest.TestCase):
             "```\n"
             "trac-id__4419 4419\n"
             "type__release_blocker__release_process_bug release blocker: release process bug\n"
-            "author__some_author some-author\n"
             "reporter__adi adi\n"
             "priority__some_priority some-priority\n"
             "milestone__some_milestone some-milestone\n"
             "branch__4419_some_branch_somewhere 4419-some-branch-somewhere\n"
+            "branch_author__someone_like_you someone_like_you\n"
             "status__some_status some-status\n"
             "component__some_component some-component\n"
             "keywords__some_keywords some-keywords\n"
@@ -191,7 +187,7 @@ class TestBody(unittest.TestCase):
                     'time': 1234,
                     'changetime': 1236000000,
                     'branch': '4419-some-branch-somewhere',
-                    'author': 'some-author',
+                    'branch_author': 'someone_like_you',
                     'priority': 'some-priority',
                     'milestone': 'some-milestone',
                     'status': 'some-status',
@@ -543,7 +539,10 @@ class TestGitHubRequest(unittest.TestCase):
                 't_type': 'task',
                 'time': 1288883091000000,
                 'changetime': 1360238496689890,
-                'branch': 'https://github.com/chevah/agent-1.5/pull/10'
+                'branch': 'https://github.com/chevah/agent-1.5/pull/10',
+                'branch_author': 'somebody_i_used_to_know',
+                'cc': 'the_nsa',
+                'version': '2.0',
                 }],
             ticket_mapping={},
             )
@@ -561,13 +560,21 @@ class TestGitHubRequest(unittest.TestCase):
         self.assertEqual('danuker', request.data['assignee'])
         self.assertEqual('some-milestone', request.milestone)
         self.assertEqual('summary', request.data['title'])
+
+        # Test just one metadata field (before `type__`).
+        # The rest are tested in TestBody.
         self.assertEqual(
             'trac-6 task was created by @adiroiban on 2010-11-04 15:04:51Z.\n'
             'Last changed on 2013-02-07 12:01:36Z.\n'
-            'PR at https://github.com/chevah/agent-1.5/pull/10.\n'
+            'Branch at https://github.com/chevah/agent-1.5/pull/10.\n'
             '\n'
-            'description',
-            request.data['body'])
+            'description\n'
+            '\n'
+            '<details><summary>Searchable metadata</summary>\n'
+            '\n'
+            '```\n'
+            'trac-id__6 6\n',
+            request.data['body'].split('type__')[0])
 
 
 class TestNumberPredictor(unittest.TestCase):
