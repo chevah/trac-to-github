@@ -4,6 +4,17 @@ USER_MAPPING = {
     'danuker': ('danuker', 'Dan Haiduc <danuthaiduc@gmail.com>'),
     }
 
+# GitHub User to GitHub UID mapping (for avatar purposes).
+UID_MAPPING = {
+    'adiroiban': 204609,
+    }
+
+# Users that are allowed by GitHub
+# to be assignees of issues in the target repositories.
+ASSIGNABLE_USERS = {
+    'adiroiban',
+    }
+
 TRAC_TICKET_PREFIX = 'https://trac.chevah.com/ticket/'
 
 # None or a tuple of (name, email)

@@ -4,8 +4,8 @@
 # Adapted from: https://stackoverflow.com/a/56040892
 DBNAME=trac
 
-# ticket_change takes ~5 minutes (140k entries)
-for table_name in attachment ticket ticket_change
+# Export takes ~1 minute
+for table_name in attachment ticket ticket_change ticket_custom session session_attribute
 do
   pg_dump --file "results_dump.sql" --no-password --verbose --format=p --create --clean --disable-dollar-quoting --inserts --column-inserts --section=pre-data --section=data --no-owner  --table "public.${table_name}" $DBNAME
 

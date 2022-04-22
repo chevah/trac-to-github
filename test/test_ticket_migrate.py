@@ -7,24 +7,6 @@ import ticket_migrate_golden_comet_preview as tm
 tm.config = config_test
 
 
-class TestRepositoryMapping(unittest.TestCase):
-    """
-    Trac components map to the configured GitHub repositories.
-
-    These tests depend on `config.py` having the contents
-    from `config.py.sample`.
-    """
-
-    def test_get_repo(self):
-        """
-        Check that the issue is opened in the correct GitHub repository
-        based on the Trac component.
-        """
-        self.assertEqual(tm.get_repo('client'), 'client')
-        self.assertEqual(tm.get_repo('commons'), 'commons')
-        self.assertEqual(tm.get_repo('fallback'), 'server')
-
-
 class TestLabelMapping(unittest.TestCase):
     """
     Trac labels are parsed based on component, priority, and keywords_string.
@@ -64,16 +46,15 @@ class TestLabelMapping(unittest.TestCase):
             [],
             tm.labels_from_keywords(', , ,,  '))
         self.assertEqual(
-            ['tag', 'tag', 'tag'],
-            tm.labels_from_keywords('tag, ,tag ,,tag  '))
+            ['priority-normal', 'tag'],
+            tm.get_labels(keywords='tag, ,tag ,,tag  '))
 
     def test_get_labels_none(self):
         """
-        The issues that do not map to the fallback repository
-        get no label based on the component.
+        The component gets converted to
         """
         self.assertEqual(
-            ['priority-low', 'tech-debt'],
+            ['client', 'priority-low', 'tech-debt'],
             tm.get_labels(
                 component='client',
                 priority='Low',
@@ -83,30 +64,68 @@ class TestLabelMapping(unittest.TestCase):
                 ))
 
         self.assertEqual(
-            ['priority-high'],
+            ['priority-high', 'server'],
             tm.get_labels(
-                component='client',
+                component='server',
                 priority='High',
                 keywords='',
                 status='',
                 resolution='',
                 ))
 
-        # Handles "None" correctly.
-        self.assertEqual(
-            ['priority-low'],
-            tm.get_labels(
-                component='client',
-                priority=None,
-                keywords='',
-                status=None,
-                resolution=None,
-                ))
+        # Handles missing args (None) correctly.
+        self.assertEqual(['priority-normal'], tm.get_labels())
 
     def test_get_labels_component_name(self):
         self.assertEqual(
             ['fallback', 'priority-low'],
-            tm.get_labels('fallback', 'Low', '', '', ''))
+            tm.get_labels(
+                component='fallback',
+                priority='Low'
+                )
+            )
+
+    def test_labels_from_status_and_resolution(self):
+        """
+        Status can be empty/None or:
+            new, assigned, closed, reopened.
+        If status is closed, resolution can be empty/None or:
+            duplicate, fixed, invalid,
+        """
+        self.assertEqual(
+            {'assigned'},
+            tm.labels_from_status_and_resolution('assigned', '')
+            )
+        self.assertEqual(
+            {'assigned'},
+            tm.labels_from_status_and_resolution('assigned', None)
+            )
+        self.assertEqual(
+            {'closed'},
+            tm.labels_from_status_and_resolution('closed', None)
+            )
+        self.assertEqual(
+            {'worksforme'},
+            tm.labels_from_status_and_resolution('closed', 'worksforme')
+            )
+        self.assertEqual(
+            {'new'},
+            tm.labels_from_status_and_resolution('new', '')
+            )
+        self.assertEqual(
+            {},
+            tm.labels_from_status_and_resolution(None, None)
+            )
+
+    def test_labels_from_type(self):
+        self.assertEqual(
+            ['defect', 'priority-normal'],
+            tm.get_labels(type='defect')
+            )
+        self.assertEqual(
+            ['priority-normal', 'release-blocker'],
+            tm.get_labels(type='release blocker: regression')
+            )
 
 
 class TestAssigneeMapping(unittest.TestCase):
@@ -135,10 +154,12 @@ class TestBody(unittest.TestCase):
         self.maxDiff = 10000
 
         self.assertEqual(
-            "trac-4419 release blocker: release process bug"
-            " was created by @adiroiban on 1970-01-01 00:00:00Z.\n"
-            "Last changed on 1970-01-01 00:20:36Z.\n"
-            "Branch at 4419-some-branch-somewhere.\n"
+            "|[![adiroiban's avatar](https://avatars.githubusercontent.com/u/204609?s=50)](https://github.com/adiroiban)| @adiroiban reported|\n"
+            "|-|-|\n"
+            "|Trac ID|trac#4419|\n"
+            "|Type|release blocker: release process bug|\n"
+            "|Last changed|1970-01-01 00:20:36Z|\n"
+            "|Branch|4419-some-branch-somewhere|\n"
             "\n"
             "The ticket description. Some ```monospaced``` text.\n"
             "\n"
@@ -168,6 +189,7 @@ class TestBody(unittest.TestCase):
             "branch__4419_some_branch_somewhere 4419-some-branch-somewhere\n"
             "branch_author__someone_like_you someone_like_you\n"
             "status__some_status some-status\n"
+            "resolution__some_resolution some-resolution\n"
             "component__some_component some-component\n"
             "keywords__some_keywords some-keywords\n"
             "cc__some_cc some-cc\n"
@@ -191,6 +213,7 @@ class TestBody(unittest.TestCase):
                     'priority': 'some-priority',
                     'milestone': 'some-milestone',
                     'status': 'some-status',
+                    'resolution': 'some-resolution',
                     'component': 'some-component',
                     'keywords': 'some-keywords',
                     'cc': 'some-cc',
@@ -401,10 +424,10 @@ class TestParseBody(unittest.TestCase):
 
     def test_missing_ticket_replacement(self):
         """
-        Leaves missing Trac ticket IDs alone.
+        Missing Trac ticket IDs are converted to trac#1234 autolinks..
         """
         self.assertEqual(
-            "Some issue is solved in #345.",
+            "Some issue is solved in trac#345.",
             tm.parse_body(
                 description="Some issue is solved in #345.",
                 ticket_mapping={123: 'some_url/234'},
@@ -429,7 +452,7 @@ class TestParseBody(unittest.TestCase):
         Does not convert Trac ticket IDs when only a string subset matches.
         """
         self.assertEqual(
-            "Some issue is solved in #1234.",
+            "Some issue is solved in trac#1234.",
             tm.parse_body(
                 description="Some issue is solved in #1234.",
                 ticket_mapping={123: 'some_url/234'},
@@ -445,11 +468,12 @@ class TestCommentGeneration(unittest.TestCase):
         trac_data = {
             'ticket': 3928,
             'c_time': 1489439926524055,
-            'author': 'adi',
+            'author': 'mthuurne',
             'newvalue': 'Thanks.',
             }
         desired_body = (
-            "Comment by adiroiban at 2017-03-13 21:18:46Z.\n"
+            "|[![mthuurne's avatar](https://avatars.githubusercontent.com/u/246676?s=50)](https://github.com/mthuurne)|@mthuurne commented|\n"
+            "|-|-|\n"
             "\n"
             "Thanks."
             )
@@ -473,7 +497,8 @@ class TestCommentGeneration(unittest.TestCase):
             'newvalue': 'Thanks.',
             }
         desired_body = (
-            "Comment by andradaE at 2017-03-07 18:03:39Z.\n"
+            "|[![andradaE's avatar](https://avatars.githubusercontent.com/u/1691790?s=50)](https://github.com/andradaE)|@andradaE commented|\n"
+            "|-|-|\n"
             "\n"
             "Thanks."
             )
@@ -499,7 +524,8 @@ class TestCommentGeneration(unittest.TestCase):
                 )
             }
         desired_body = (
-            "Comment by andradaE at 2017-03-07 18:03:39Z.\n"
+            "|[![andradaE's avatar](https://avatars.githubusercontent.com/u/1691790?s=50)](https://github.com/andradaE)|@andradaE commented|\n"
+            "|-|-|\n"
             "\n"
             "[Style Guide](http://styleguide.chevah.com/tickets.html)"
             )
@@ -526,7 +552,7 @@ class TestGitHubRequest(unittest.TestCase):
         request_gen = tm.GitHubRequest.fromTracDataMultiple(
             trac_data=[{
                 'component': 'trac-migration-staging',
-                'owner': 'danuker',
+                'owner': 'adi',
                 'status': 'closed',
                 'resolution': 'wontfix',
                 'milestone': 'some-milestone',
@@ -534,7 +560,7 @@ class TestGitHubRequest(unittest.TestCase):
                 'description': 'description',
                 'priority': 'high',
                 'keywords': 'feature, easy',
-                'reporter': 'adi',
+                'reporter': 'danuker',
                 't_id': 6,
                 't_type': 'task',
                 'time': 1288883091000000,
@@ -553,20 +579,28 @@ class TestGitHubRequest(unittest.TestCase):
 
         self.assertEqual('trac-migration-staging', request.repo)
         self.assertEqual('chevah', request.owner)
-        self.assertEqual('danuker', request.data['assignee'])
+        self.assertEqual('adiroiban', request.data['assignee'])
         self.assertEqual(
-            ['easy', 'feature', 'priority-high', 'wontfix'],
+            [
+                'easy',
+                'feature',
+                'priority-high',
+                'trac-migration-staging',
+                'wontfix'
+                ],
             request.data['labels'])
-        self.assertEqual('danuker', request.data['assignee'])
         self.assertEqual('some-milestone', request.milestone)
         self.assertEqual('summary', request.data['title'])
 
         # Test just one metadata field (before `type__`).
         # The rest are tested in TestBody.
         self.assertEqual(
-            'trac-6 task was created by @adiroiban on 2010-11-04 15:04:51Z.\n'
-            'Last changed on 2013-02-07 12:01:36Z.\n'
-            'Branch at https://github.com/chevah/agent-1.5/pull/10.\n'
+            "|[![danuker's avatar](https://avatars.githubusercontent.com/u/1691790?s=50)](https://github.com/danuker)| @danuker reported|\n"
+            '|-|-|\n'
+            '|Trac ID|trac#6|\n'
+            '|Type|task|\n'
+            '|Last changed|2013-02-07 12:01:36Z|\n'
+            '|Branch|https://github.com/chevah/agent-1.5/pull/10|\n'
             '\n'
             'description\n'
             '\n'
@@ -725,44 +759,6 @@ class TestNumberPredictor(unittest.TestCase):
                 [7, 8, 9, 10, 11],
                 ),
             self.sut.orderTickets(tickets, [])
-            )
-
-    def test_orderTickets_multiple_repos(self):
-        """
-        Splits tickets correctly across repositories.
-        """
-        self.sut.next_numbers['commons'] = 7
-        self.sut.next_numbers['trac-migration-staging'] = 17
-        tickets = [
-            {'t_id': 1, 'component': 'commons'},
-            {'t_id': 7, 'component': 'commons'},
-            {'t_id': 11, 'component': 'trac-migration-staging'},
-            {'t_id': 17, 'component': 'trac-migration-staging'},
-            ]
-
-        output, expected_github = self.sut.orderTickets(tickets, [])
-
-        commons_output = [t for t in output if t['component'] == 'commons']
-        migration_output = [
-            t for t in output if t['component'] == 'trac-migration-staging']
-
-        self.assertEqual(
-            [
-                {'t_id': 7, 'component': 'commons'},
-                {'t_id': 1, 'component': 'commons'},
-                ],
-            commons_output
-            )
-        self.assertEqual(
-            [
-                {'t_id': 17, 'component': 'trac-migration-staging'},
-                {'t_id': 11, 'component': 'trac-migration-staging'},
-                ],
-            migration_output
-            )
-        self.assertEqual(
-            expected_github,
-            [7, 8, 17, 18]
             )
 
 

@@ -6,17 +6,22 @@ USER_MAPPING = {
     'danuker': ('danuker', 'Dan Haiduc <danuthaiduc@gmail.com>'),
     }
 
-TRAC_TICKET_PREFIX = 'https://trac.chevah.com/ticket/'
-
-# Trac ticket Component to GitHub repository mapping.
-REPOSITORY_MAPPING = {
-    'client': 'client',
-    'commons': 'commons',
-    'trac-migration-staging': 'trac-migration-staging',
+# GitHub User to GitHub UID mapping (for avatar purposes).
+UID_MAPPING = {
+    'adiroiban': 204609,
+    'mthuurne': 246676,
     }
 
-# GitHub repository for Trac tickets with Component not in the mapping.
-FALLBACK_REPOSITORY = 'server'
+# Users that are allowed by GitHub
+# to be assignees of issues in the target repositories.
+ASSIGNABLE_USERS = {
+    'adiroiban',
+    }
+
+TRAC_TICKET_PREFIX = 'https://trac.chevah.com/ticket/'
+
+# GitHub repository for Trac tickets.
+REPOSITORY = 'trac-migration-staging'
 
 # Owner of GitHub repositories where to create issues.
 OWNER = 'chevah'

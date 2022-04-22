@@ -60,7 +60,6 @@ def main():
             all_comments=comments,
             ticket_mapping=ticket_mapping
             )
-        issue.submitToProject()
 
     print("Issue creation complete. You may now manually open issues and PRs.")
 
@@ -75,7 +74,7 @@ def select_tickets(tickets):
     submitted_ids = get_tickets().keys()
     tickets = [t for t in tickets if t['t_id'] not in submitted_ids]
 
-    return [t for t in tickets if t['t_id'] in [78, 4419, 7827]]
+    return [t for t in tickets if t['t_id'] in [10057]]
     return tickets
 
 
@@ -119,7 +118,7 @@ def read_trac_tickets():
     # but max(time) forces the other row fields to be the most up to date.
     # https://www.sqlite.org/quirks.html#aggregate_queries_can_contain_non_aggregate_result_columns_that_are_not_in_the_group_by_clause
     ticket_branches = {}
-    ticket_branch_authors ={}
+    ticket_branch_authors = {}
     for changerow in db.execute(
             """
             SELECT max(time), ticket, field, newvalue 
@@ -338,10 +337,7 @@ class NumberPredictor:
 
         Return the ticket objects in order, and their expected GitHub numbers.
         """
-        repositories = (
-            [config.REPOSITORY_MAPPING[k] for k in config.REPOSITORY_MAPPING] +
-            [config.FALLBACK_REPOSITORY]
-            )
+        repositories = [config.REPOSITORY]
         all_repo_ordered_tickets = []
         expected_github_numbers = []
 
@@ -350,9 +346,7 @@ class NumberPredictor:
             self.next_numbers[repo] = self.requestNextNumber(
                 repo, already_created)
 
-            tickets_by_id = {
-                t['t_id']: t
-                for t in select_tickets_for_repo(tickets, repo)}
+            tickets_by_id = {t['t_id']: t for t in tickets}
             ordered_tickets = []
             not_matching = deque()
 
@@ -408,22 +402,6 @@ def unique(elements):
     return uniques
 
 
-def select_tickets_for_repo(tickets, repo: str):
-    """
-    From a list of Trac tickets,
-    select the ones that will be posted to a given GitHub repository.
-    """
-    return [t for t in tickets if get_repo(t['component']) == repo]
-
-
-def get_repo(component):
-    """
-    Given the Trac component,
-    choose the GitHub repository to create the issue in.
-    """
-    return config.REPOSITORY_MAPPING.get(component, config.FALLBACK_REPOSITORY)
-
-
 def output_stats(tickets, expected_numbers):
     """
     Show how many tickets will preserve their Trac ID.
@@ -451,6 +429,17 @@ def github_link(repo, expected_number):
     given the repository name and expected GitHub issue number.
     """
     return f'https://github.com/{config.OWNER}/{repo}/issues/{expected_number}'
+
+
+def avatar(user):
+    """
+    Insert an image of the user's avatar, and link to the account.
+    """
+    user_uid = config.UID_MAPPING.get(
+        user,
+        1691790  # chevah-robot's avatar
+        )
+    return f"[![{user}'s avatar](https://avatars.githubusercontent.com/u/{user_uid}?s=50)](https://github.com/{user})"
 
 
 class GitHubRequest:
@@ -569,93 +558,6 @@ class GitHubRequest:
         """
         return config.TRAC_TICKET_PREFIX + str(self.t_id)
 
-    def getOrCreateProject(self):
-        """
-        If a project for the given milestone exists, return its column IDs,
-        otherwise create it and return its column IDs.
-        Remembers projects in `projects_created.tsv`.
-
-        API docs:
-        https://docs.github.com/en/rest/reference/projects#create-an-organization-project
-        https://docs.github.com/en/rest/reference/projects#create-a-project-column
-        """
-        name = self.milestone
-        if not name:
-            # Some tickets don't have a milestone.
-            return
-
-        # Check whether we have already created the project.
-        with open('projects_created.tsv') as f:
-            projects_data = [line.split('\t') for line in f]
-            for line_name, _, todo_id, done_id, rejected_id in projects_data:
-                if line_name == name:
-                    return todo_id, done_id, rejected_id
-
-        # We have not created the project. Create it.
-        response = protected_request(
-            url=f'https://api.github.com/orgs/{config.PROJECT_ORG}/projects',
-            data={'name': name}
-            )
-        project_id = response.json()['id']
-        columns_url = response.json()['columns_url']
-
-        # Create 3 columns: To Do, Done, and Rejected.
-        todo_resp = protected_request(columns_url, data={'name': 'To Do'})
-        done_resp = protected_request(columns_url, data={'name': 'Done'})
-        rejected_resp = protected_request(columns_url, data={
-            'name': 'Rejected', 'body': 'duplicate, invalid, or wontfix'})
-
-        # Close the project.
-        protected_request(
-            url=f'https://api.github.com/projects/{project_id}',
-            data={'state': 'closed'},
-            method=requests.patch,
-            expected_status_code=200,
-            )
-
-        todo_id = todo_resp.json()['id']
-        done_id = done_resp.json()['id']
-        rejected_id = rejected_resp.json()['id']
-
-        with open('projects_created.tsv', 'a') as f:
-            f.write('\t'.join([
-                name,
-                str(project_id),
-                str(todo_id),
-                str(done_id),
-                str(rejected_id),
-                ]) + '\n')
-
-        return todo_id, done_id, rejected_id
-
-    def submitToProject(self):
-        """
-        Add an issue identified by the GitHub global `id`
-        to the proper column of the proper project.
-
-        API docs (very bad ones):
-        https://docs.github.com/en/rest/reference/projects#create-a-project-card
-        """
-        column_ids = self.getOrCreateProject()
-        if not column_ids:
-            return
-
-        todo_id, done_id, rejected_id = column_ids
-
-        # Set the column ID according to issue status and resolution.
-        column_id = todo_id
-        if self.closed:
-            column_id = rejected_id
-            if self.resolution == 'fixed':
-                column_id = done_id
-
-        url = f'https://api.github.com/projects/columns/{column_id}/cards'
-        data = {
-            'content_id': self.github_id,
-            'content_type': 'Issue'
-            }
-        protected_request(url, data)
-
     @classmethod
     def fromTracData(
             cls,
@@ -664,9 +566,14 @@ class GitHubRequest:
         """
         Create a GitHubRequest from Trac ticket data fields.
         """
+        desired_assignees = get_assignees(kwargs['owner'])
+        assignees = [
+            a for a in desired_assignees if a in config.ASSIGNABLE_USERS
+            ]
+
         return cls(
             owner=config.OWNER,
-            repo=get_repo(kwargs['component']),
+            repo=config.REPOSITORY,
             trac_id=kwargs['t_id'],
             title=kwargs['summary'],
             body=get_body(
@@ -677,14 +584,8 @@ class GitHubRequest:
             closed=kwargs['status'] == 'closed',
             resolution=kwargs['resolution'],
             milestone=kwargs['milestone'],
-            labels=get_labels(
-                kwargs['component'],
-                kwargs['priority'],
-                kwargs['keywords'],
-                kwargs['status'],
-                kwargs['resolution']
-                ),
-            assignees=get_assignees(kwargs['owner']),
+            labels=get_labels(**kwargs),
+            assignees=assignees,
             created_at=isotime(kwargs['time']),
             updated_at=isotime(kwargs['changetime'])
             )
@@ -708,9 +609,9 @@ class GitHubRequest:
             trac_data['author'],
             (trac_data['author'], 'ignored-email-field')
             )
-
         body = (
-            f"Comment by {author} at {showtime(trac_data['c_time'])}.\n"
+            f"|{avatar(author)}|@{author} commented|\n"
+            f"|-|-|\n"
             f"\n"
             f"{parse_body(trac_data['newvalue'], ticket_mapping)}"
             )
@@ -792,11 +693,11 @@ def get_body(description, data, ticket_mapping):
 
     changed_message = ''
     if data['changetime'] != data['time']:
-        changed_message = f"Last changed on {showtime(data['changetime'])}.\n"
+        changed_message = f"|Last changed|{showtime(data['changetime'])}|\n"
 
     branch_message = ''
     if data['branch']:
-        branch_message = f"Branch at {data['branch']}.\n"
+        branch_message = f"|Branch|{data['branch']}|\n"
 
     attachments_message = ''
     if 'attachments' in data and data['attachments']:
@@ -809,8 +710,10 @@ def get_body(description, data, ticket_mapping):
                               f"{attachment_links_message}"
 
     body = (
-        f"trac-{data['t_id']} {data['t_type']} was created by @{reporter}"
-        f" on {showtime(data['time'])}.\n"
+        f"|{avatar(reporter)}| @{reporter} reported|\n"
+        f"|-|-|\n"
+        f"|Trac ID|trac#{data['t_id']}|\n"
+        f"|Type|{data['t_type']}|\n"
         f"{changed_message}"
         f"{branch_message}"
         "\n"
@@ -822,22 +725,41 @@ def get_body(description, data, ticket_mapping):
     return body
 
 
-def get_labels(component, priority, keywords, status, resolution):
+def get_labels(
+        component=None,
+        priority=None,
+        keywords=None,
+        status=None,
+        resolution=None,
+        type=None,
+        **kwargs):
     """
     Given the Trac component, priority, keywords, and resolution,
     return the labels to apply on the GitHub issue.
     """
     priority_label = labels_from_priority(priority)
+    type_labels = labels_from_type(type)
     keyword_labels = labels_from_keywords(keywords)
     component_labels = labels_from_component(component)
     status_labels = labels_from_status_and_resolution(status, resolution)
     labels = (
         {priority_label}.union(
+            type_labels).union(
             keyword_labels).union(
             component_labels).union(
             status_labels)
         )
     return sorted(labels)
+
+
+def labels_from_type(ticket_type):
+    if not ticket_type:
+        return {}
+
+    if ticket_type.startswith('release blocker'):
+        return {'release-blocker'}
+
+    return {ticket_type}
 
 
 def get_assignees(owner):
@@ -881,7 +803,7 @@ def labels_from_component(component: str):
     Given the Trac component,
     choose the labels to apply on the GitHub issue, if any.
     """
-    if component in config.REPOSITORY_MAPPING:
+    if not component:
         return []
 
     return [component]
@@ -902,10 +824,11 @@ def labels_from_keywords(keywords: Union[str, None]):
 
 def labels_from_priority(priority):
     """
-    Interpret None (missing) priority as Low.
+    Interpret None (missing) priority as normal
+    (because it is the most frequent in DB counts).
     """
     if priority is None:
-        return 'priority-low'
+        return 'priority-normal'
     return 'priority-{}'.format(priority.lower())
 
 
@@ -920,10 +843,11 @@ def labels_from_status_and_resolution(status, resolution):
     if status == 'closed' and resolution:
         return {resolution}
 
-    if status in ['in_work', 'needs_changes', 'needs_merge', 'needs_review']:
-        return {status.replace('_', '-')}
+    if status:
+        return {status}
 
-    return set()
+    # There is no status nor resolution.
+    return {}
 
 
 def format_attachments(ticket_id, attachment_list):
@@ -955,6 +879,7 @@ def format_metadata(ticket_data):
         'branch '
         'branch_author '
         'status '
+        'resolution '
         'component '
         'keywords '
         'cc '
@@ -1050,9 +975,11 @@ def convert_issue_content(text, ticket_mapping):
                 text
                 )
         except KeyError:
-            # We don't know this ticket. Leave it alone.
-            print("Warning: unknown ticket: #" + str(match))
-            pass
+            # We don't know this ticket. Warn about it.
+            print(
+                f"Warning: ticket #{match} not in tickets_expected_gold.tsv"
+                f" - using trac#{match}")
+            text = sub(f'#{match}', f'trac#{match}', text)
 
     return convert(text, base_path='')
 
