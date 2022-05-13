@@ -65,7 +65,7 @@ Things that are not yet auto-converted:
 
 # Ticket migration
 
-* Copy `config.py.sample` over `config.py`, and edit all the settings.
+* Copy `config.py.sample` to `config.py`, and edit all the settings.
   Perhaps use a fake `OAUTH_TOKEN` to avoid accidental changes.
 * Dump and convert the Postgres DB to SQLite, if you don't already have it,
   using `postgres-to-sqlite.sh`.

@@ -33,7 +33,6 @@ def main():
     Read the Trac DB and post the tickets to GitHub.
     """
     to_submit = list(select_tickets(read_trac_tickets()))
-    comments = list(read_trac_comments())
     submitted_already = get_tickets('tickets_created.tsv').values()
     np = NumberPredictor()
     attach_attachments(tickets=to_submit, attachments=read_trac_attachments())
@@ -42,6 +41,18 @@ def main():
         )
 
     ticket_mapping = get_ticket_mapping(to_submit, expected_numbers)
+
+    comments = [
+        comment_from_trac_data(c, ticket_mapping) for c in read_trac_comments()
+        ]
+    comments.extend(
+        status_change_from_trac_data(change)
+        for change in read_trac_status_changes()
+        )
+    comments.extend(
+        owner_change_from_trac_data(change)
+        for change in read_trac_owner_changes()
+        )
 
     # Parse tickets into GitHub issue objects.
     issues = list(GitHubRequest.fromTracDataMultiple(
@@ -74,7 +85,7 @@ def select_tickets(tickets):
     submitted_ids = get_tickets().keys()
     tickets = [t for t in tickets if t['t_id'] not in submitted_ids]
 
-    return [t for t in tickets if t['t_id'] in [10057]]
+    return [t for t in tickets if t['t_id'] in [4536]]
     return tickets
 
 
@@ -222,6 +233,44 @@ def read_trac_attachments():
             }
 
 
+def read_trac_status_changes():
+    """
+    Read the Trac status change data from the database.
+    """
+    db = get_db()
+    for row in db.execute(
+            "SELECT * FROM ticket_change where field = 'status';"):
+        ticket, c_time, author, field, oldvalue, newvalue = row
+
+        yield {
+            't_id': ticket,
+            'c_time': c_time,
+            'author': author,
+            'field': field,
+            'oldvalue': oldvalue,
+            'newvalue': newvalue,
+            }
+
+
+def read_trac_owner_changes():
+    """
+    Read the Trac ticket owner changes data from the database.
+    """
+    db = get_db()
+    for row in db.execute(
+            "SELECT * FROM ticket_change where field = 'owner';"):
+        ticket, c_time, author, field, oldvalue, newvalue = row
+
+        yield {
+            't_id': ticket,
+            'c_time': c_time,
+            'author': author,
+            'field': field,
+            'oldvalue': oldvalue,
+            'newvalue': newvalue,
+            }
+
+
 def attach_attachments(tickets, attachments):
     """
     Augment each ticket entry with a list of its attachments.
@@ -232,6 +281,81 @@ def attach_attachments(tickets, attachments):
 
     for t in tickets:
         t['attachments'] = tickets_to_attachments[str(t['t_id'])]
+
+
+def comment_from_trac_data(trac_data, ticket_mapping):
+    """
+    Convert Trac comment data to GitHub comment body as JSON.
+    """
+    author = get_GitHub_user(trac_data['author'])
+    body = (
+        f"|{avatar(author)}|@{author} commented|\n"
+        f"|-|-|\n"
+        f"\n"
+        f"{parse_body(trac_data['newvalue'], ticket_mapping)}"
+        )
+
+    return {
+        't_id': trac_data['t_id'],
+        'github_comment': {
+            'created_at': isotime(trac_data['c_time']), 'body': body
+            }
+        }
+
+
+def status_change_from_trac_data(trac_data):
+    """
+    Convert a ticket status change to a GitHub comment.
+    """
+    author = get_GitHub_user(trac_data['author'])
+    body = (
+        f"|{avatar(author)}|@{author} set status to `{trac_data['newvalue']}`.|\n"
+        f"|-|-|\n"
+    )
+
+    return {
+        't_id': trac_data['t_id'],
+        'github_comment': {
+            'created_at': isotime(trac_data['c_time']), 'body': body
+            }
+        }
+
+
+def owner_change_from_trac_data(trac_data):
+    """
+    Convert a ticket status change to a GitHub comment.
+    """
+    author = get_GitHub_user(trac_data['author'])
+    owner = get_GitHub_user(trac_data['newvalue'])
+    if owner:
+        action = f'set owner to @{owner}'
+    else:
+        action = 'removed owner'
+
+    body = (
+        f"|{avatar(author)}|@{author} {action}.|\n"
+        f"|-|-|\n"
+    )
+
+    return {
+        't_id': trac_data['t_id'],
+        'github_comment': {
+            'created_at': isotime(trac_data['c_time']), 'body': body
+            }
+        }
+
+
+def get_GitHub_user(user):
+    """
+    Fetch a user from the config mapping, discarding the e-mail.
+    """
+    github_user, _ = config.USER_MAPPING.get(
+        user,
+        (user, 'ignored-email-for-unpacking')
+        )
+    if github_user is not None:
+        github_user = github_user.split(' <')[0]
+    return github_user
 
 
 def get_db():
@@ -493,15 +617,11 @@ class GitHubRequest:
         url = f'https://api.github.com/repos/{self.owner}/{self.repo}/import/issues'
         data = {
             'issue': self.data,
-            'comments': []
+            'comments': [
+                c['github_comment'] for c in all_comments
+                if c['t_id'] == self.t_id
+                ]
             }
-
-        for comment in (c for c in all_comments if c['t_id'] == self.t_id):
-            data['comments'].append(
-                self.commentFromTracData(
-                    comment, ticket_mapping=ticket_mapping
-                    )
-                )
 
         response = protected_request(
             url=url, data=data, expected_status_code=202)
@@ -599,24 +719,6 @@ class GitHubRequest:
             yield cls.fromTracData(
                 **{**ticket, 'ticket_mapping': ticket_mapping}
                 )
-
-    @staticmethod
-    def commentFromTracData(trac_data, ticket_mapping):
-        """
-        Convert Trac comment data to GitHub comment body as JSON.
-        """
-        author, _ = config.USER_MAPPING.get(
-            trac_data['author'],
-            (trac_data['author'], 'ignored-email-field')
-            )
-        body = (
-            f"|{avatar(author)}|@{author} commented|\n"
-            f"|-|-|\n"
-            f"\n"
-            f"{parse_body(trac_data['newvalue'], ticket_mapping)}"
-            )
-
-        return {'created_at': isotime(trac_data['c_time']), 'body': body}
 
 
 def protected_request(
