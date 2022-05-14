@@ -984,7 +984,6 @@ def format_metadata(ticket_data):
         'resolution '
         'component '
         'keywords '
-        'cc '
         'time '
         'changetime '
         'owner '

@@ -200,7 +200,6 @@ class TestBody(unittest.TestCase):
             "resolution__some_resolution some-resolution\n"
             "component__some_component some-component\n"
             "keywords__some_keywords some-keywords\n"
-            "cc__some_cc some-cc\n"
             "time__1234 1234\n"
             "changetime__1236000000 1236000000\n"
             "owner__some_owner some-owner\n"
