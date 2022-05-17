@@ -11,6 +11,7 @@ import sqlite3
 import sys
 import time
 from collections import deque, defaultdict
+from itertools import chain
 from typing import Union
 
 from attachment_links import get_attachment_path
@@ -41,18 +42,23 @@ def main():
         )
 
     ticket_mapping = get_ticket_mapping(to_submit, expected_numbers)
+    raw_comments = chain(
+        read_trac_owner_changes(),
+        read_trac_status_changes(),
+        read_trac_comments(),
+        )
+    comments_by_ticket_and_time = group_comments(raw_comments)
 
-    comments = [
-        comment_from_trac_data(c, ticket_mapping) for c in read_trac_comments()
-        ]
-    comments.extend(
-        status_change_from_trac_data(change)
-        for change in read_trac_status_changes()
-        )
-    comments.extend(
-        owner_change_from_trac_data(change)
-        for change in read_trac_owner_changes()
-        )
+    comments = {
+        t_id: [
+            comment_from_trac_changes(
+                comments_by_ticket_and_time[t_id][created_time],
+                ticket_mapping
+                )
+            for created_time in comments_by_ticket_and_time[t_id]
+            ]
+        for t_id in comments_by_ticket_and_time
+        }
 
     # Parse tickets into GitHub issue objects.
     issues = list(GitHubRequest.fromTracDataMultiple(
@@ -75,6 +81,20 @@ def main():
     print("Issue creation complete. You may now manually open issues and PRs.")
 
 
+def group_comments(raw_comments):
+    """
+    Group comments by ticket and time.
+    """
+    comments_by_ticket = defaultdict(lambda: [])
+    for c in raw_comments:
+        comments_by_ticket[c['t_id']].append(c)
+    comments_by_ticket_and_time = defaultdict(lambda: defaultdict(lambda: []))
+    for t_id in comments_by_ticket:
+        for c in comments_by_ticket[t_id]:
+            comments_by_ticket_and_time[t_id][c['c_time']].append(c)
+    return comments_by_ticket_and_time
+
+
 def select_tickets(tickets):
     """
     Easy-to-edit method to choose tickets to submit.
@@ -85,7 +105,12 @@ def select_tickets(tickets):
     submitted_ids = get_tickets().keys()
     tickets = [t for t in tickets if t['t_id'] not in submitted_ids]
 
-    return [t for t in tickets if t['t_id'] in [4536]]
+    return [t for t in tickets if t['t_id'] in [
+        4536,  # a lot of changes
+        # 4258,  # Reopened
+        # 9300,  # Reopened -> new
+        9335,  # Reopened -> closed, milestone
+        ]]
     return tickets
 
 
@@ -283,66 +308,88 @@ def attach_attachments(tickets, attachments):
         t['attachments'] = tickets_to_attachments[str(t['t_id'])]
 
 
-def comment_from_trac_data(trac_data, ticket_mapping):
+def comment_from_trac_changes(changes, ticket_mapping):
     """
-    Convert Trac comment data to GitHub comment body as JSON.
+    Convert a list of ticket changes occurring at the same time
+    into a GitHub comment.
     """
-    author = get_GitHub_user(trac_data['author'])
+    # We only support one comment per change group.
+    assert len([c for c in changes if c['field'] == 'comment']) <= 1, changes
+    # We have at least one change.
+    assert len(changes) >= 1, changes
+    # All changes are at the same time.
+    assert len(set(c['c_time'] for c in changes)) == 1, changes
+    # All changes are on the same ticket.
+    assert len(set(c['t_id'] for c in changes)) == 1, changes
+
+    comment = {
+        'newvalue': '',
+        't_id': changes[0]['t_id'],
+        'c_time': changes[0]['c_time'],
+        'author': changes[0]['author'],
+        }
+    comments = [c for c in changes if c['field'] == 'comment']
+    if comments:
+        comment = comments[0]
+
+    # Description of actions performed.
+    actions_performed = '<br>'.join(
+        dispatch_ticket_change(c) for c in changes if c['field'] != 'comment'
+        )
+    if not actions_performed:
+        author = get_GitHub_user(comment['author'])
+        actions_performed = f'@{author} commented:'
+
+    author = get_GitHub_user(changes[0]['author'])
+    comment_body = ''
+
+    if comment['newvalue']:
+        comment_body = f"\n{parse_body(comment['newvalue'], ticket_mapping)}"
     body = (
-        f"|{avatar(author)}|@{author} commented|\n"
+        f"|{avatar(author)}|{actions_performed}|\n"
         f"|-|-|\n"
-        f"\n"
-        f"{parse_body(trac_data['newvalue'], ticket_mapping)}"
+        f"{comment_body}"
         )
 
     return {
-        't_id': trac_data['t_id'],
+        't_id': comment['t_id'],
         'github_comment': {
-            'created_at': isotime(trac_data['c_time']), 'body': body
+            'created_at': isotime(comment['c_time']), 'body': body
             }
         }
+
+
+def dispatch_ticket_change(trac_data):
+    """
+    Calls the appropriate method to process a ticket change into a description.
+    """
+    if trac_data['field'] == 'status':
+        return status_change_from_trac_data(trac_data)
+    if trac_data['field'] == 'owner':
+        return owner_change_from_trac_data(trac_data)
+    raise ValueError(f'Unhandled field for data: {trac_data}')
 
 
 def status_change_from_trac_data(trac_data):
     """
-    Convert a ticket status change to a GitHub comment.
+    Convert a ticket status change to a text description.
     """
     author = get_GitHub_user(trac_data['author'])
-    body = (
-        f"|{avatar(author)}|@{author} set status to `{trac_data['newvalue']}`.|\n"
-        f"|-|-|\n"
-    )
-
-    return {
-        't_id': trac_data['t_id'],
-        'github_comment': {
-            'created_at': isotime(trac_data['c_time']), 'body': body
-            }
-        }
+    return f"@{author} set status to `{trac_data['newvalue']}`."
 
 
 def owner_change_from_trac_data(trac_data):
     """
-    Convert a ticket status change to a GitHub comment.
+    Convert a ticket status change to a text description.
     """
     author = get_GitHub_user(trac_data['author'])
     owner = get_GitHub_user(trac_data['newvalue'])
+
+    action = 'removed owner'
     if owner:
         action = f'set owner to @{owner}'
-    else:
-        action = 'removed owner'
 
-    body = (
-        f"|{avatar(author)}|@{author} {action}.|\n"
-        f"|-|-|\n"
-    )
-
-    return {
-        't_id': trac_data['t_id'],
-        'github_comment': {
-            'created_at': isotime(trac_data['c_time']), 'body': body
-            }
-        }
+    return f'@{author} {action}.'
 
 
 def get_GitHub_user(user):
@@ -542,7 +589,10 @@ def output_stats(tickets, expected_numbers):
     match_count = sum(1 for t, e in zipped if t.t_id == e)
     print('Expected GitHub numbers to match Trac ID: '
           f'{match_count} out of {len(tickets)}')
-    print('Check tickets_expected.tsv, and if correct, continue the debugger.')
+    print(
+        'Check tickets_expected.tsv, and if correct, continue the debugger. '
+        f'Tickets will be submitted to GitHub: {not DRY_RUN}'
+        )
     import pdb
     pdb.set_trace()
 
@@ -561,7 +611,7 @@ def avatar(user):
     """
     user_uid = config.UID_MAPPING.get(
         user,
-        1691790  # chevah-robot's avatar
+        583231  # GitHub octocat. UID 0 won't scale to 50 px.
         )
     return f"[![{user}'s avatar](https://avatars.githubusercontent.com/u/{user_uid}?s=50)](https://github.com/{user})"
 
@@ -591,9 +641,7 @@ class GitHubRequest:
         if assignees:
             self.data['assignee'] = assignees[0]
 
-        # We used updated_at, because some tickets were repurposed,
-        # and it was more meaningful as the GitHub created_at.
-        self.data['created_at'] = updated_at
+        self.data['created_at'] = created_at
         self.data['updated_at'] = updated_at
         if closed:
             # We are assuming closure is the last modification.
@@ -617,10 +665,7 @@ class GitHubRequest:
         url = f'https://api.github.com/repos/{self.owner}/{self.repo}/import/issues'
         data = {
             'issue': self.data,
-            'comments': [
-                c['github_comment'] for c in all_comments
-                if c['t_id'] == self.t_id
-                ]
+            'comments': all_comments[self.t_id]
             }
 
         response = protected_request(
@@ -816,6 +861,7 @@ def get_body(description, data, ticket_mapping):
         f"|-|-|\n"
         f"|Trac ID|trac#{data['t_id']}|\n"
         f"|Type|{data['t_type']}|\n"
+        f"|Created|{showtime(data['time'])}|\n"
         f"{changed_message}"
         f"{branch_message}"
         "\n"

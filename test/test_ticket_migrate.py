@@ -166,6 +166,7 @@ class TestBody(unittest.TestCase):
             "|-|-|\n"
             "|Trac ID|trac#4419|\n"
             "|Type|release blocker: release process bug|\n"
+            "|Created|1970-01-01 00:00:00Z|\n"
             "|Last changed|1970-01-01 00:20:36Z|\n"
             "|Branch|4419-some-branch-somewhere|\n"
             "\n"
@@ -472,14 +473,15 @@ class TestCommentGeneration(unittest.TestCase):
         """
         Check that the body of a comment includes its author and latest text.
         """
-        trac_data = {
+        trac_data = [{
             't_id': 3928,
             'c_time': 1489439926524055,
             'author': 'mthuurne',
+            'field': 'comment',
             'newvalue': 'Thanks.',
-            }
+            }]
         desired_body = (
-            "|[![mthuurne's avatar](https://avatars.githubusercontent.com/u/246676?s=50)](https://github.com/mthuurne)|@mthuurne commented|\n"
+            "|[![mthuurne's avatar](https://avatars.githubusercontent.com/u/246676?s=50)](https://github.com/mthuurne)|@mthuurne commented:|\n"
             "|-|-|\n"
             "\n"
             "Thanks."
@@ -487,7 +489,7 @@ class TestCommentGeneration(unittest.TestCase):
 
         self.assertEqual(
             desired_body,
-            tm.comment_from_trac_data(
+            tm.comment_from_trac_changes(
                 trac_data,
                 ticket_mapping={}
                 )['github_comment']['body']
@@ -497,14 +499,15 @@ class TestCommentGeneration(unittest.TestCase):
         """
         A user not defined in config.py is preserved.
         """
-        trac_data = {
+        trac_data = [{
             't_id': 3928,
             'c_time': 1488909819877801,
             'author': 'andradaE',
+            'field': 'comment',
             'newvalue': 'Thanks.',
-            }
+            }]
         desired_body = (
-            "|[![andradaE's avatar](https://avatars.githubusercontent.com/u/1691790?s=50)](https://github.com/andradaE)|@andradaE commented|\n"
+            "|[![andradaE's avatar](https://avatars.githubusercontent.com/u/583231?s=50)](https://github.com/andradaE)|@andradaE commented:|\n"
             "|-|-|\n"
             "\n"
             "Thanks."
@@ -512,7 +515,7 @@ class TestCommentGeneration(unittest.TestCase):
 
         self.assertEqual(
             desired_body,
-            tm.comment_from_trac_data(
+            tm.comment_from_trac_changes(
                 trac_data,
                 ticket_mapping={}
                 )['github_comment']['body']
@@ -522,16 +525,17 @@ class TestCommentGeneration(unittest.TestCase):
         """
         Check that at least some formatting works.
         """
-        trac_data = {
+        trac_data = [{
             't_id': 3928,
             'c_time': 1488909819877801,
             'author': 'andradaE',
+            'field': 'comment',
             'newvalue': (
                 '[http://styleguide.chevah.com/tickets.html Style Guide]'
-                )
-            }
+                ),
+            }]
         desired_body = (
-            "|[![andradaE's avatar](https://avatars.githubusercontent.com/u/1691790?s=50)](https://github.com/andradaE)|@andradaE commented|\n"
+            "|[![andradaE's avatar](https://avatars.githubusercontent.com/u/583231?s=50)](https://github.com/andradaE)|@andradaE commented:|\n"
             "|-|-|\n"
             "\n"
             "[Style Guide](http://styleguide.chevah.com/tickets.html)"
@@ -539,7 +543,7 @@ class TestCommentGeneration(unittest.TestCase):
 
         self.assertEqual(
             desired_body,
-            tm.comment_from_trac_data(
+            tm.comment_from_trac_changes(
                 trac_data,
                 ticket_mapping={},
                 )['github_comment']['body']
@@ -549,12 +553,13 @@ class TestCommentGeneration(unittest.TestCase):
         """
         A GitHub comment is created from a status change.
         """
-        trac_data = {
+        trac_data = [{
             't_id': 3928,
             'c_time': 1489439926524055,
             'author': 'mthuurne',
+            'field': 'status',
             'newvalue': 'reopened',
-            }
+            }]
         desired_body = (
             "|[![mthuurne's avatar](https://avatars.githubusercontent.com/u/246676?s=50)](https://github.com/mthuurne)|@mthuurne set status to `reopened`.|\n"
             "|-|-|\n"
@@ -562,7 +567,9 @@ class TestCommentGeneration(unittest.TestCase):
 
         self.assertEqual(
             desired_body,
-            tm.status_change_from_trac_data(trac_data)['github_comment']['body']
+            tm.comment_from_trac_changes(
+                trac_data, ticket_mapping={}
+                )['github_comment']['body']
             )
 
     def test_assignment(self):
@@ -576,33 +583,59 @@ class TestCommentGeneration(unittest.TestCase):
             'newvalue': 'mthuurne',
             }
         desired_body = (
-            "|[![andradaE's avatar](https://avatars.githubusercontent.com/u/1691790?s=50)](https://github.com/andradaE)|@andradaE set owner to @mthuurne.|\n"
-            "|-|-|\n"
+            "@andradaE set owner to @mthuurne."
             )
 
         self.assertEqual(
             desired_body,
-            tm.owner_change_from_trac_data(trac_data)['github_comment']['body']
+            tm.owner_change_from_trac_data(trac_data)
             )
 
-    def test_unassignment(self):
+    def test_complex(self):
         """
-        A GitHub comment is created from a removal of the owner.
+        A GitHub comment is created from a removal of the owner,
+        a status change and a comment.
         """
-        trac_data = {
-            't_id': 3928,
-            'c_time': 1489439926524055,
-            'author': 'andradaE',
-            'newvalue': '',
-            }
+        trac_data = [
+            {
+                't_id': 3928,
+                'c_time': 1489439926524055,
+                'author': 'andradaE',
+                'field': 'owner',
+                'newvalue': '',
+                },
+            {
+                't_id': 3928,
+                'c_time': 1489439926524055,
+                'author': 'andradaE',
+                'field': 'status',
+                'newvalue': 'closed',
+                },
+            {
+                't_id': 3928,
+                'c_time': 1489439926524055,
+                'author': 'andradaE',
+                'field': 'comment',
+                'newvalue': 'Finally, this is done!',
+                },
+            ]
+
         desired_body = (
-            "|[![andradaE's avatar](https://avatars.githubusercontent.com/u/1691790?s=50)](https://github.com/andradaE)|@andradaE removed owner.|\n"
+            "|[![andradaE's avatar]"
+            "(https://avatars.githubusercontent.com/u/583231?s=50)]"
+            "(https://github.com/andradaE)|"
+            "@andradaE removed owner.<br>"
+            "@andradaE set status to `closed`.|\n"
             "|-|-|\n"
+            "\n"
+            "Finally, this is done!"
             )
 
         self.assertEqual(
             desired_body,
-            tm.owner_change_from_trac_data(trac_data)['github_comment']['body']
+            tm.comment_from_trac_changes(
+                trac_data, ticket_mapping={}
+                )['github_comment']['body']
             )
 
 
@@ -662,10 +695,11 @@ class TestGitHubRequest(unittest.TestCase):
         # Test just one metadata field (before `type__`).
         # The rest are tested in TestBody.
         self.assertEqual(
-            "|[![danuker's avatar](https://avatars.githubusercontent.com/u/1691790?s=50)](https://github.com/danuker)| @danuker reported|\n"
+            "|[![danuker's avatar](https://avatars.githubusercontent.com/u/583231?s=50)](https://github.com/danuker)| @danuker reported|\n"
             '|-|-|\n'
             '|Trac ID|trac#6|\n'
             '|Type|task|\n'
+            '|Created|2010-11-04 15:04:51Z|\n'
             '|Last changed|2013-02-07 12:01:36Z|\n'
             '|Branch|https://github.com/chevah/agent-1.5/pull/10|\n'
             '\n'
