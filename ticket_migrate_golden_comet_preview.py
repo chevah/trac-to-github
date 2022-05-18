@@ -1014,6 +1014,13 @@ def format_attachments(ticket_id, attachment_list):
         )
 
 
+def sanitize_email(user):
+    """
+    Sanitize emails like Trac, by removing the domain.
+    """
+    return user.split('@', 1)[0]
+
+
 def format_metadata(ticket_data):
     """
     Output a machine-readable section out of the ticket data.
@@ -1055,7 +1062,8 @@ def format_metadata(ticket_data):
         }
 
     formatted = '\n'.join(f'{k}__{v}' for k, v in renamed_data.items())
-
+    cc_input = ticket_data['cc'].split(', ') if ticket_data['cc'] else ''
+    cc_output = ' '.join(f'cc__{sanitize_email(user)}' for user in cc_input)
     return (
         '\n'
         '\n'
@@ -1063,6 +1071,7 @@ def format_metadata(ticket_data):
         '\n'
         '```\n'
         f'{formatted}\n'
+        f'{cc_output}\n'
         '```\n'
         '</details>\n'
         )
