@@ -107,9 +107,11 @@ def select_tickets(tickets):
 
     return [t for t in tickets if t['t_id'] in [
         4536,  # a lot of changes
-        # 4258,  # Reopened
+        4258,  # Reopened
+        3621,  # Reopened, enhancement, link to other ticket
         # 9300,  # Reopened -> new
-        9335,  # Reopened -> closed, milestone
+        # 9335,  # Reopened -> closed, milestone
+
         ]]
     return tickets
 
@@ -401,7 +403,7 @@ def get_GitHub_user(user):
         (user, 'ignored-email-for-unpacking')
         )
     if github_user is not None:
-        github_user = github_user.split(' <')[0]
+        github_user = github_user.split(' <', 1)[0]
     return github_user
 
 
@@ -879,14 +881,14 @@ def get_labels(
         keywords=None,
         status=None,
         resolution=None,
-        type=None,
+        t_type=None,
         **kwargs):
     """
     Given the Trac component, priority, keywords, and resolution,
     return the labels to apply on the GitHub issue.
     """
     priority_label = labels_from_priority(priority)
-    type_labels = labels_from_type(type)
+    type_labels = labels_from_type(t_type)
     keyword_labels = labels_from_keywords(keywords)
     component_labels = labels_from_component(component)
     status_labels = labels_from_status_and_resolution(status, resolution)

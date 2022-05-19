@@ -51,7 +51,7 @@ class TestLabelMapping(unittest.TestCase):
 
     def test_get_labels_none(self):
         """
-        The component gets converted to
+        When priority field is missing, it is automatically assigned "normal".
         """
         self.assertEqual(
             ['client', 'priority-low', 'tech-debt'],
@@ -77,10 +77,13 @@ class TestLabelMapping(unittest.TestCase):
         self.assertEqual(['priority-normal'], tm.get_labels())
 
     def test_get_labels_component_name(self):
+        """
+        The component gets converted to a label.
+        """
         self.assertEqual(
-            ['fallback', 'priority-low'],
+            ['priority-low', 'release management'],
             tm.get_labels(
-                component='fallback',
+                component='release management',
                 priority='Low'
                 )
             )
@@ -120,11 +123,11 @@ class TestLabelMapping(unittest.TestCase):
     def test_labels_from_type(self):
         self.assertEqual(
             ['defect', 'priority-normal'],
-            tm.get_labels(type='defect')
+            tm.get_labels(t_type='defect')
             )
         self.assertEqual(
             ['priority-normal', 'release-blocker'],
-            tm.get_labels(type='release blocker: regression')
+            tm.get_labels(t_type='release blocker: regression')
             )
 
 
@@ -205,6 +208,7 @@ class TestBody(unittest.TestCase):
             "changetime__1236000000 1236000000\n"
             "owner__some_owner some-owner\n"
             "version__some_version some-version\n"
+            "cc__some-cc cc__other_CC cc__mail_domain_stripped\n"
             "```\n"
             "</details>\n",
 
@@ -224,7 +228,7 @@ class TestBody(unittest.TestCase):
                     'resolution': 'some-resolution',
                     'component': 'some-component',
                     'keywords': 'some-keywords',
-                    'cc': 'some-cc',
+                    'cc': 'some-cc, other_CC, mail_domain_stripped@cc.com',
                     'owner': 'some-owner',
                     'version': 'some-version',
                     'attachments': (
@@ -685,6 +689,7 @@ class TestGitHubRequest(unittest.TestCase):
                 'easy',
                 'feature',
                 'priority-high',
+                'task',
                 'trac-migration-staging',
                 'wontfix'
                 ],
@@ -709,7 +714,7 @@ class TestGitHubRequest(unittest.TestCase):
             '\n'
             '```\n'
             'trac-id__6 6\n',
-            request.data['body'].split('type__')[0])
+            request.data['body'].split('type__', 1)[0])
 
 
 class TestNumberPredictor(unittest.TestCase):
