@@ -106,12 +106,13 @@ def select_tickets(tickets):
     tickets = [t for t in tickets if t['t_id'] not in submitted_ids]
 
     return [t for t in tickets if t['t_id'] in [
-        4536,  # a lot of changes
-        4258,  # Reopened
-        3621,  # Reopened, enhancement, link to other ticket
+        # 4536,  # a lot of changes
+        # 4258,  # Reopened
+        3621,  # Reopened, enhancement, link to another ticket
         # 9300,  # Reopened -> new
-        # 9335,  # Reopened -> closed, milestone
-
+        # 9335,  # Reopened -> closed, milestone, code example
+        # 5786,  # First comment replies to ticket
+        # 6887,  # Enhancement, second comment replies to different ticket
         ]]
     return tickets
 
@@ -325,6 +326,7 @@ def comment_from_trac_changes(changes, ticket_mapping):
     assert len(set(c['t_id'] for c in changes)) == 1, changes
 
     comment = {
+        'oldvalue': '',
         'newvalue': '',
         't_id': changes[0]['t_id'],
         'c_time': changes[0]['c_time'],
@@ -340,7 +342,12 @@ def comment_from_trac_changes(changes, ticket_mapping):
         )
     if not actions_performed:
         author = get_GitHub_user(comment['author'])
-        actions_performed = f'@{author} commented:'
+        actions_performed = f'{tag_or_not(author)} commented:'
+
+    comment_number = comment.get('oldvalue', '').split('.')[-1]
+    comment_anchor = ''
+    if comment_number:
+        comment_anchor = f'<a name="note_{comment_number}"></a>'
 
     author = get_GitHub_user(changes[0]['author'])
     comment_body = ''
@@ -348,7 +355,7 @@ def comment_from_trac_changes(changes, ticket_mapping):
     if comment['newvalue']:
         comment_body = f"\n{parse_body(comment['newvalue'], ticket_mapping)}"
     body = (
-        f"|{avatar(author)}|{actions_performed}|\n"
+        f"|{avatar(author)}{comment_anchor}|{actions_performed}|\n"
         f"|-|-|\n"
         f"{comment_body}"
         )
@@ -377,7 +384,7 @@ def status_change_from_trac_data(trac_data):
     Convert a ticket status change to a text description.
     """
     author = get_GitHub_user(trac_data['author'])
-    return f"@{author} set status to `{trac_data['newvalue']}`."
+    return f"{tag_or_not(author)} set status to `{trac_data['newvalue']}`."
 
 
 def owner_change_from_trac_data(trac_data):
@@ -389,9 +396,9 @@ def owner_change_from_trac_data(trac_data):
 
     action = 'removed owner'
     if owner:
-        action = f'set owner to @{owner}'
+        action = f'set owner to {tag_or_not(owner)}'
 
-    return f'@{author} {action}.'
+    return f'{tag_or_not(author)} {action}.'
 
 
 def get_GitHub_user(user):
@@ -403,7 +410,7 @@ def get_GitHub_user(user):
         (user, 'ignored-email-for-unpacking')
         )
     if github_user is not None:
-        github_user = github_user.split(' <', 1)[0]
+        github_user = github_user.replace('<automation>', 'Automation').split(' <', 1)[0]
     return github_user
 
 
@@ -610,12 +617,16 @@ def github_link(repo, expected_number):
 def avatar(user):
     """
     Insert an image of the user's avatar, and link to the account.
+    Some UIDs won't scale to 50 (example: albertkoch),
+    so we force it via an HTML img tag.
     """
     user_uid = config.UID_MAPPING.get(
         user,
-        583231  # GitHub octocat. UID 0 won't scale to 50 px.
+        0  # GitHub octocat ghost (does not scale to 50).
         )
-    return f"[![{user}'s avatar](https://avatars.githubusercontent.com/u/{user_uid}?s=50)](https://github.com/{user})"
+    if user_uid:
+        return f"[<img alt=\"{user}'s avatar\" src=\"https://avatars.githubusercontent.com/u/{user_uid}?s=50\" width=\"50\" height=\"50\">](https://github.com/{user})"
+    return f"<img alt=\"{user}'s avatar\" src=\"https://avatars.githubusercontent.com/u/0?s=50\" width=\"50\" height=\"50\">"
 
 
 class GitHubRequest:
@@ -623,6 +634,9 @@ class GitHubRequest:
     Transform Trac tickets, comments, and their metadata to GitHub format,
     and allow submitting that format.
     """
+    # Cache for milestone title -> GitHub ID.
+    milestones = {}
+
     def __init__(
             self, owner, repo, trac_id,
             title, body, closed, resolution, milestone, labels, assignees,
@@ -634,15 +648,17 @@ class GitHubRequest:
         self.closed = closed
         self.resolution = resolution
         self.milestone = milestone
+
+        # Data to submit to GitHub.
         self.data = {
             'title': title,
             'body': body,
             'labels': labels,
             'closed': closed,
+            'milestone': self.getOrCreateMilestone(self.milestone)
             }
         if assignees:
             self.data['assignee'] = assignees[0]
-
         self.data['created_at'] = created_at
         self.data['updated_at'] = updated_at
         if closed:
@@ -667,7 +683,7 @@ class GitHubRequest:
         url = f'https://api.github.com/repos/{self.owner}/{self.repo}/import/issues'
         data = {
             'issue': self.data,
-            'comments': all_comments[self.t_id]
+            'comments': [c['github_comment'] for c in all_comments[self.t_id]]
             }
 
         response = protected_request(
@@ -675,12 +691,12 @@ class GitHubRequest:
 
         if response:
             # Remember the GitHub URL assigned to each ticket.
-            self.github_import_id = response.json()['id']
+            github_import_id = response.json()['id']
 
             while response.json()['status'] == 'pending':
                 # Wait until our issue is created.
                 print('Waiting for import to finish...')
-                check_url = f'{url}/{self.github_import_id}'
+                check_url = f'{url}/{github_import_id}'
                 response = protected_request(
                     url=check_url,
                     data=None,
@@ -726,6 +742,44 @@ class GitHubRequest:
         return config.TRAC_TICKET_PREFIX + str(self.t_id)
 
     @classmethod
+    def getOrCreateMilestone(cls, title):
+        """
+        If a GitHub milestone exists named like the Trac one, return its ID,
+        otherwise create it and return its ID.
+        Remembers milestones in `milestones_created.tsv`.
+
+        API docs:
+        https://docs.github.com/en/rest/issues/milestones#create-a-milestone
+        """
+        if not title:
+            # Some tickets don't have a milestone.
+            return
+
+        if title in cls.milestones:
+            return cls.milestones[title]
+
+        # Check whether we have already created the project.
+        with open('milestones_created.tsv') as f:
+            projects_data = [line.split('\t') for line in f]
+            for line_title, number in projects_data:
+                if line_title == title:
+                    cls.milestones[title] = int(number)
+                    return int(number)
+
+        # We have not created the project. Create it.
+        response = protected_request(
+            url=f'https://api.github.com/repos/{config.OWNER}/{config.REPOSITORY}/milestones',
+            data={'title': title}
+            )
+        milestone_number = response.json()['number']
+
+        with open('milestones_created.tsv', 'a') as f:
+            f.write('\t'.join([title, str(milestone_number)]) + '\n')
+
+        cls.milestones[title] = milestone_number
+        return milestone_number
+
+    @classmethod
     def fromTracData(
             cls,
             ticket_mapping,
@@ -769,7 +823,7 @@ class GitHubRequest:
 
 
 def protected_request(
-        url, data, method=requests.post, expected_status_code=201):
+        url, data, method=requests.post, expected_status_code=201, debug=True):
     """
     Send a request if DRY_RUN is not truthy.
 
@@ -787,7 +841,7 @@ def protected_request(
     # but accessing the issue immediately after returns a 404.
     # Also, there may be a risk of secondary rate limit:
     # https://docs.github.com/en/rest/guides/best-practices-for-integrators#dealing-with-secondary-rate-limits
-    time.sleep(0.2)
+    time.sleep(0.5)
 
     response = method(
         url=url,
@@ -796,7 +850,7 @@ def protected_request(
         auth=(config.OAUTH_USER, config.OAUTH_TOKEN)
         )
 
-    if response.status_code != expected_status_code:
+    if response.status_code != expected_status_code and debug:
         print(f'Error: {method} request failed!')
         debug_response(response)
 
@@ -814,6 +868,8 @@ def debug_response(response):
     pprint.pprint(response.json())
     import pdb
     pdb.set_trace()
+    print('Done debugging!')
+    return response
 
 
 def wait_for_rate_reset(response):
@@ -828,6 +884,16 @@ def wait_for_rate_reset(response):
             f"Waiting {to_sleep / 60} minutes "
             f"(until {reset_time}) for rate limit reset.")
         time.sleep(to_sleep)
+
+
+def tag_or_not(user):
+    """
+    Either tag/mention a user with an at-sign (`@user`) if they have a UID,
+    or use their Trac name without linking, if they don't.
+    """
+    if user in config.UID_MAPPING:
+        return f"@{user}"
+    return user
 
 
 def get_body(description, data, ticket_mapping):
@@ -859,7 +925,7 @@ def get_body(description, data, ticket_mapping):
                               f"{attachment_links_message}"
 
     body = (
-        f"|{avatar(reporter)}| @{reporter} reported|\n"
+        f"|{avatar(reporter)}| {tag_or_not(reporter)} reported|\n"
         f"|-|-|\n"
         f"|Trac ID|trac#{data['t_id']}|\n"
         f"|Type|{data['t_type']}|\n"
@@ -1041,7 +1107,6 @@ def format_metadata(ticket_data):
         'keywords '
         'time '
         'changetime '
-        'owner '
         'version'
         )
 
@@ -1066,6 +1131,8 @@ def format_metadata(ticket_data):
     formatted = '\n'.join(f'{k}__{v}' for k, v in renamed_data.items())
     cc_input = ticket_data['cc'].split(', ') if ticket_data['cc'] else ''
     cc_output = ' '.join(f'cc__{sanitize_email(user)}' for user in cc_input)
+    sanitized_owner = process(sanitize_email(ticket_data["owner"]))
+    owner = f'owner__{sanitized_owner}'
     return (
         '\n'
         '\n'
@@ -1074,6 +1141,7 @@ def format_metadata(ticket_data):
         '```\n'
         f'{formatted}\n'
         f'{cc_output}\n'
+        f'{owner}\n'
         '```\n'
         '</details>\n'
         )
@@ -1162,6 +1230,14 @@ def parse_curly(description, ticket_mapping):
     if content.strip().startswith('#!rst'):
         return (
             content.split('#!rst', 1)[1] +
+            parse_body(description[ending:], ticket_mapping)
+            )
+
+    if content.strip().startswith('#!python'):
+        return (
+            '```python' +
+            content.split('#!python', 1)[1] +
+            '```' +
             parse_body(description[ending:], ticket_mapping)
             )
 

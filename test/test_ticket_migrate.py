@@ -165,7 +165,7 @@ class TestBody(unittest.TestCase):
         self.maxDiff = 10000
 
         self.assertEqual(
-            "|[![adiroiban's avatar](https://avatars.githubusercontent.com/u/204609?s=50)](https://github.com/adiroiban)| @adiroiban reported|\n"
+            "|[<img alt=\"adiroiban's avatar\" src=\"https://avatars.githubusercontent.com/u/204609?s=50\" width=\"50\" height=\"50\">](https://github.com/adiroiban)| @adiroiban reported|\n"
             "|-|-|\n"
             "|Trac ID|trac#4419|\n"
             "|Type|release blocker: release process bug|\n"
@@ -206,9 +206,9 @@ class TestBody(unittest.TestCase):
             "keywords__some_keywords some-keywords\n"
             "time__1234 1234\n"
             "changetime__1236000000 1236000000\n"
-            "owner__some_owner some-owner\n"
             "version__some_version some-version\n"
             "cc__some-cc cc__other_CC cc__mail_domain_stripped\n"
+            "owner__some_owner some-owner\n"
             "```\n"
             "</details>\n",
 
@@ -261,6 +261,28 @@ class TestParseBody(unittest.TestCase):
         self.assertEqual(
             'text `monospace` text',
             tm.parse_body('text `monospace` text', ticket_mapping={})
+            )
+
+    def test_pycode(self):
+        """
+        Python code is preserved.
+        """
+        self.assertEqual(
+            'text\n'
+            '```python\n'
+            'print("hello world!")\n'
+            '```\n'
+            'text',
+
+            tm.parse_body(
+                'text\n'
+                '{{{#!python\n'
+                'print("hello world!")\n'
+                '}}}\n'
+                'text',
+
+                ticket_mapping={}
+                )
             )
 
     def test_curly(self):
@@ -362,6 +384,22 @@ class TestParseBody(unittest.TestCase):
     def test_links(self):
         """
         TracWiki syntax links get converted to Markdown links.
+        """
+        self.assertEqual(
+            "In order to "
+            "[avoid third-party cookies](https://github.com/chevah/sftpplus.com/pull/254), "
+            "we need to handle the contact form ourselves.",
+            tm.parse_body(
+                "In order to "
+                "[https://github.com/chevah/sftpplus.com/pull/254 avoid third-party cookies], "
+                "we need to handle the contact form ourselves.",
+                ticket_mapping={},
+                )
+            )
+
+    def test_anchor_links_removed(self):
+        """
+        Remove anchor links, since they will not be preserved in GitHub.
         """
         self.assertEqual(
             "In order to "
@@ -482,10 +520,11 @@ class TestCommentGeneration(unittest.TestCase):
             'c_time': 1489439926524055,
             'author': 'mthuurne',
             'field': 'comment',
+            'oldvalue': '12.13',
             'newvalue': 'Thanks.',
             }]
         desired_body = (
-            "|[![mthuurne's avatar](https://avatars.githubusercontent.com/u/246676?s=50)](https://github.com/mthuurne)|@mthuurne commented:|\n"
+            '|[<img alt="mthuurne\'s avatar" src="https://avatars.githubusercontent.com/u/246676?s=50" width="50" height="50">](https://github.com/mthuurne)<a name="note_13"></a>|@mthuurne commented:|\n'
             "|-|-|\n"
             "\n"
             "Thanks."
@@ -511,7 +550,7 @@ class TestCommentGeneration(unittest.TestCase):
             'newvalue': 'Thanks.',
             }]
         desired_body = (
-            "|[![andradaE's avatar](https://avatars.githubusercontent.com/u/583231?s=50)](https://github.com/andradaE)|@andradaE commented:|\n"
+            '|<img alt="andradaE\'s avatar" src="https://avatars.githubusercontent.com/u/0?s=50" width="50" height="50">|andradaE commented:|\n'
             "|-|-|\n"
             "\n"
             "Thanks."
@@ -539,7 +578,7 @@ class TestCommentGeneration(unittest.TestCase):
                 ),
             }]
         desired_body = (
-            "|[![andradaE's avatar](https://avatars.githubusercontent.com/u/583231?s=50)](https://github.com/andradaE)|@andradaE commented:|\n"
+            '|<img alt="andradaE\'s avatar" src="https://avatars.githubusercontent.com/u/0?s=50" width="50" height="50">|andradaE commented:|\n'
             "|-|-|\n"
             "\n"
             "[Style Guide](http://styleguide.chevah.com/tickets.html)"
@@ -565,7 +604,7 @@ class TestCommentGeneration(unittest.TestCase):
             'newvalue': 'reopened',
             }]
         desired_body = (
-            "|[![mthuurne's avatar](https://avatars.githubusercontent.com/u/246676?s=50)](https://github.com/mthuurne)|@mthuurne set status to `reopened`.|\n"
+            '|[<img alt="mthuurne\'s avatar" src="https://avatars.githubusercontent.com/u/246676?s=50" width="50" height="50">](https://github.com/mthuurne)|@mthuurne set status to `reopened`.|\n'
             "|-|-|\n"
             )
 
@@ -587,7 +626,7 @@ class TestCommentGeneration(unittest.TestCase):
             'newvalue': 'mthuurne',
             }
         desired_body = (
-            "@andradaE set owner to @mthuurne."
+            "andradaE set owner to @mthuurne."
             )
 
         self.assertEqual(
@@ -625,11 +664,9 @@ class TestCommentGeneration(unittest.TestCase):
             ]
 
         desired_body = (
-            "|[![andradaE's avatar]"
-            "(https://avatars.githubusercontent.com/u/583231?s=50)]"
-            "(https://github.com/andradaE)|"
-            "@andradaE removed owner.<br>"
-            "@andradaE set status to `closed`.|\n"
+            "|<img alt=\"andradaE's avatar\" src=\"https://avatars.githubusercontent.com/u/0?s=50\" width=\"50\" height=\"50\">|"
+            "andradaE removed owner.<br>"
+            "andradaE set status to `closed`.|\n"
             "|-|-|\n"
             "\n"
             "Finally, this is done!"
@@ -659,7 +696,7 @@ class TestGitHubRequest(unittest.TestCase):
                 'owner': 'adi',
                 'status': 'closed',
                 'resolution': 'wontfix',
-                'milestone': 'some-milestone',
+                'milestone': '',    # Tested manually due to side-effects.
                 'summary': 'summary',
                 'description': 'description',
                 'priority': 'high',
@@ -694,13 +731,12 @@ class TestGitHubRequest(unittest.TestCase):
                 'wontfix'
                 ],
             request.data['labels'])
-        self.assertEqual('some-milestone', request.milestone)
         self.assertEqual('summary', request.data['title'])
 
         # Test just one metadata field (before `type__`).
         # The rest are tested in TestBody.
         self.assertEqual(
-            "|[![danuker's avatar](https://avatars.githubusercontent.com/u/583231?s=50)](https://github.com/danuker)| @danuker reported|\n"
+            '|<img alt="danuker\'s avatar" src="https://avatars.githubusercontent.com/u/0?s=50" width="50" height="50">| danuker reported|\n'
             '|-|-|\n'
             '|Trac ID|trac#6|\n'
             '|Type|task|\n'
