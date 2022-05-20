@@ -4,6 +4,7 @@
 USER_MAPPING = {
     'adi': ('adiroiban', 'Adi Roiban <adi.roiban@chevah.com>'),
     'danuker': ('danuker', 'Dan Haiduc <danuthaiduc@gmail.com>'),
+    'Adi Roiban': ('adiroiban', 'Adi Roiban <adi.roiban@chevah.com>'),
     }
 
 # GitHub User to GitHub UID mapping (for avatar purposes).

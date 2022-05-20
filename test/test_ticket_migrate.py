@@ -149,6 +149,15 @@ class TestAssigneeMapping(unittest.TestCase):
             'SomeUser', tm.get_GitHub_user('SomeUser <some@email.com>')
             )
 
+    def test_user_mapping_after_stripping(self):
+        """
+        Users are looked up after stripping the e-mail.
+        """
+        self.assertEqual(
+            'adiroiban',
+            tm.get_GitHub_user('Adi Roiban <adi.roiban@chevah.com>')
+            )
+
 
 class TestBody(unittest.TestCase):
     """
@@ -170,7 +179,6 @@ class TestBody(unittest.TestCase):
             "|Trac ID|trac#4419|\n"
             "|Type|release blocker: release process bug|\n"
             "|Created|1970-01-01 00:00:00Z|\n"
-            "|Last changed|1970-01-01 00:20:36Z|\n"
             "|Branch|4419-some-branch-somewhere|\n"
             "\n"
             "The ticket description. Some ```monospaced``` text.\n"
@@ -524,7 +532,7 @@ class TestCommentGeneration(unittest.TestCase):
             'newvalue': 'Thanks.',
             }]
         desired_body = (
-            '|[<img alt="mthuurne\'s avatar" src="https://avatars.githubusercontent.com/u/246676?s=50" width="50" height="50">](https://github.com/mthuurne)<a name="note_13"></a>|@mthuurne commented:|\n'
+            '|[<img alt="mthuurne\'s avatar" src="https://avatars.githubusercontent.com/u/246676?s=50" width="50" height="50">](https://github.com/mthuurne)<a name="note_13"></a>|@mthuurne commented|\n'
             "|-|-|\n"
             "\n"
             "Thanks."
@@ -550,7 +558,7 @@ class TestCommentGeneration(unittest.TestCase):
             'newvalue': 'Thanks.',
             }]
         desired_body = (
-            '|<img alt="andradaE\'s avatar" src="https://avatars.githubusercontent.com/u/0?s=50" width="50" height="50">|andradaE commented:|\n'
+            '|<img alt="andradaE\'s avatar" src="https://avatars.githubusercontent.com/u/0?s=50" width="50" height="50">|andradaE commented|\n'
             "|-|-|\n"
             "\n"
             "Thanks."
@@ -578,7 +586,7 @@ class TestCommentGeneration(unittest.TestCase):
                 ),
             }]
         desired_body = (
-            '|<img alt="andradaE\'s avatar" src="https://avatars.githubusercontent.com/u/0?s=50" width="50" height="50">|andradaE commented:|\n'
+            '|<img alt="andradaE\'s avatar" src="https://avatars.githubusercontent.com/u/0?s=50" width="50" height="50">|andradaE commented|\n'
             "|-|-|\n"
             "\n"
             "[Style Guide](http://styleguide.chevah.com/tickets.html)"
@@ -604,7 +612,7 @@ class TestCommentGeneration(unittest.TestCase):
             'newvalue': 'reopened',
             }]
         desired_body = (
-            '|[<img alt="mthuurne\'s avatar" src="https://avatars.githubusercontent.com/u/246676?s=50" width="50" height="50">](https://github.com/mthuurne)|@mthuurne set status to `reopened`.|\n'
+            '|[<img alt="mthuurne\'s avatar" src="https://avatars.githubusercontent.com/u/246676?s=50" width="50" height="50">](https://github.com/mthuurne)|@mthuurne set status to `reopened`|\n'
             "|-|-|\n"
             )
 
@@ -626,7 +634,7 @@ class TestCommentGeneration(unittest.TestCase):
             'newvalue': 'mthuurne',
             }
         desired_body = (
-            "andradaE set owner to @mthuurne."
+            "andradaE set owner to @mthuurne"
             )
 
         self.assertEqual(
@@ -665,8 +673,8 @@ class TestCommentGeneration(unittest.TestCase):
 
         desired_body = (
             "|<img alt=\"andradaE's avatar\" src=\"https://avatars.githubusercontent.com/u/0?s=50\" width=\"50\" height=\"50\">|"
-            "andradaE removed owner.<br>"
-            "andradaE set status to `closed`.|\n"
+            "andradaE removed owner<br>"
+            "andradaE set status to `closed`|\n"
             "|-|-|\n"
             "\n"
             "Finally, this is done!"
@@ -741,7 +749,6 @@ class TestGitHubRequest(unittest.TestCase):
             '|Trac ID|trac#6|\n'
             '|Type|task|\n'
             '|Created|2010-11-04 15:04:51Z|\n'
-            '|Last changed|2013-02-07 12:01:36Z|\n'
             '|Branch|https://github.com/chevah/agent-1.5/pull/10|\n'
             '\n'
             'description\n'

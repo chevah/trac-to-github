@@ -27,6 +27,7 @@ from trac2down import convert
 
 # Set to False to perform actual GitHub issue creation.
 DRY_RUN = True
+# DRY_RUN = False
 
 
 def main():
@@ -108,11 +109,12 @@ def select_tickets(tickets):
     return [t for t in tickets if t['t_id'] in [
         # 4536,  # a lot of changes
         # 4258,  # Reopened
-        3621,  # Reopened, enhancement, link to another ticket
+        # 3621,  # Reopened, enhancement, link to another ticket
         # 9300,  # Reopened -> new
         # 9335,  # Reopened -> closed, milestone, code example
         # 5786,  # First comment replies to ticket
         # 6887,  # Enhancement, second comment replies to different ticket
+        10027,  # By Adi, enhancement, new milestoen, fixed
         ]]
     return tickets
 
@@ -342,7 +344,7 @@ def comment_from_trac_changes(changes, ticket_mapping):
         )
     if not actions_performed:
         author = get_GitHub_user(comment['author'])
-        actions_performed = f'{tag_or_not(author)} commented:'
+        actions_performed = f'{tag_or_not(author)} commented'
 
     comment_number = comment.get('oldvalue', '').split('.')[-1]
     comment_anchor = ''
@@ -384,7 +386,7 @@ def status_change_from_trac_data(trac_data):
     Convert a ticket status change to a text description.
     """
     author = get_GitHub_user(trac_data['author'])
-    return f"{tag_or_not(author)} set status to `{trac_data['newvalue']}`."
+    return f"{tag_or_not(author)} set status to `{trac_data['newvalue']}`"
 
 
 def owner_change_from_trac_data(trac_data):
@@ -398,19 +400,32 @@ def owner_change_from_trac_data(trac_data):
     if owner:
         action = f'set owner to {tag_or_not(owner)}'
 
-    return f'{tag_or_not(author)} {action}.'
+    return f'{tag_or_not(author)} {action}'
 
 
-def get_GitHub_user(user):
+def get_GitHub_user(trac_user):
     """
     Fetch a user from the config mapping, discarding the e-mail.
+    If there is no GitHub user mapped, the `trac_user` argument is returned.
     """
-    github_user, _ = config.USER_MAPPING.get(
-        user,
-        (user, 'ignored-email-for-unpacking')
-        )
-    if github_user is not None:
-        github_user = github_user.replace('<automation>', 'Automation').split(' <', 1)[0]
+    if trac_user is not None:
+        trac_user = trac_user.replace('<automation>', 'Automation').split(' <', 1)[0]
+
+    github_user, _ = config.USER_MAPPING.get(trac_user, (None, 'N/A'))
+
+    if github_user:
+        return github_user
+
+    return trac_user
+
+
+def tag_or_not(github_user):
+    """
+    Either tag/mention a user with an at-sign (`@user`) if they have a UID,
+    or use their Trac name without linking, if they don't.
+    """
+    if github_user in config.UID_MAPPING:
+        return f"@{github_user}"
     return github_user
 
 
@@ -831,7 +846,7 @@ def protected_request(
     In case of nearing rate limit, sleep until it resets.
     """
 
-    if DRY_RUN:
+    if DRY_RUN and debug:
         print(f"Would call {method} on {url} with data:")
         pprint.pprint(data)
         return
@@ -886,29 +901,11 @@ def wait_for_rate_reset(response):
         time.sleep(to_sleep)
 
 
-def tag_or_not(user):
-    """
-    Either tag/mention a user with an at-sign (`@user`) if they have a UID,
-    or use their Trac name without linking, if they don't.
-    """
-    if user in config.UID_MAPPING:
-        return f"@{user}"
-    return user
-
-
 def get_body(description, data, ticket_mapping):
     """
     Generate the ticket description body for GitHub.
     """
-    reporters = get_assignees(data['reporter'])
-    if reporters:
-        reporter = reporters[0]
-    else:
-        reporter = data['reporter']
-
-    changed_message = ''
-    if data['changetime'] != data['time']:
-        changed_message = f"|Last changed|{showtime(data['changetime'])}|\n"
+    reporter = get_GitHub_user(data['reporter'])
 
     branch_message = ''
     if data['branch']:
@@ -930,7 +927,6 @@ def get_body(description, data, ticket_mapping):
         f"|Trac ID|trac#{data['t_id']}|\n"
         f"|Type|{data['t_type']}|\n"
         f"|Created|{showtime(data['time'])}|\n"
-        f"{changed_message}"
         f"{branch_message}"
         "\n"
         f"{parse_body(description, ticket_mapping)}"
@@ -980,15 +976,12 @@ def labels_from_type(ticket_type):
 
 def get_assignees(owner):
     """
-    Map the owner to the GitHub account.
+    Map the owner to the GitHub account as assignee.
     """
-    try:
-        owner, _ = config.USER_MAPPING.get(owner)
+    owner = get_GitHub_user(owner)
+    if owner in config.ASSIGNABLE_USERS:
         return [owner]
-    except TypeError as error:
-        if 'cannot unpack non-iterable NoneType object' in str(error):
-            return []
-        raise
+    return []
 
 
 def showtime(unix_usec):
