@@ -123,7 +123,11 @@ class TestLabelMapping(unittest.TestCase):
     def test_labels_from_type(self):
         self.assertEqual(
             ['defect', 'priority-normal'],
-            tm.get_labels(t_type='defect')
+            tm.get_labels(t_type='Defect')
+            )
+        self.assertEqual(
+            ['defect', 'priority-normal'],
+            tm.get_labels(t_type='defect', keywords='defect')
             )
         self.assertEqual(
             ['priority-normal', 'release-blocker'],
@@ -195,7 +199,7 @@ class TestBody(unittest.TestCase):
             "* [0001-Make-IRCClient.noticed-empty-by-default-to-avoid-loo.patch]"
             "(https://site.com/trunk/ticket/35c/35ccaee7c6ad5b60087406a818a6e0602a2a771f/e3090ff2b269e2f0b4c2e1dfacdb7ecadb36a47b.patch) "
             "(12345 bytes) - "
-            "added by author_nickname2 on 2011-10-22 06:47:14Z - "
+            "added by author_nickname2@... on 2011-10-22 06:47:14Z - "
             "Simpler patch that just blanks the noticed() implementation\n"
             "\n"
             "<details><summary>Searchable metadata</summary>\n"
@@ -215,8 +219,8 @@ class TestBody(unittest.TestCase):
             "time__1234 1234\n"
             "changetime__1236000000 1236000000\n"
             "version__some_version some-version\n"
-            "cc__some-cc cc__other_CC cc__mail_domain_stripped\n"
             "owner__some_owner some-owner\n"
+            "cc__some-cc cc__other_CC cc__mail_domain_stripped@...\n"
             "```\n"
             "</details>\n",
 
@@ -245,7 +249,7 @@ class TestBody(unittest.TestCase):
                             'size': '12345',
                             'time': '1319266034000000',
                             'description': 'Simpler patch that just blanks the noticed() implementation',
-                            'author': 'author_nickname2',
+                            'author': 'author_nickname2@google.com',
                             },
                         {
                             'filename': 'issue4419.diff',
@@ -292,6 +296,19 @@ class TestParseBody(unittest.TestCase):
                 ticket_mapping={}
                 )
             )
+
+    def test_changeset(self):
+        """
+        Converts Trac changeset format to unquoted commit hash,
+        which is linked by GitHub automatically.
+        """
+        self.assertEqual(
+            'In changeset 11cac74c6a2b528f1caabaa63d532be0ae262c90\n',
+            tm.parse_body(
+                'In [changeset:"11cac74c6a2b528f1caabaa63d532be0ae262c90" 11cac74]:\n',
+                ticket_mapping={},
+            )
+        )
 
     def test_curly(self):
         self.assertEqual(
@@ -482,10 +499,10 @@ class TestParseBody(unittest.TestCase):
 
     def test_missing_ticket_replacement(self):
         """
-        Missing Trac ticket IDs are converted to trac#1234 autolinks..
+        Missing Trac ticket IDs are left alone as #1234.
         """
         self.assertEqual(
-            "Some issue is solved in trac#345.",
+            "Some issue is solved in #345.",
             tm.parse_body(
                 description="Some issue is solved in #345.",
                 ticket_mapping={123: 'some_url/234'},
@@ -510,7 +527,7 @@ class TestParseBody(unittest.TestCase):
         Does not convert Trac ticket IDs when only a string subset matches.
         """
         self.assertEqual(
-            "Some issue is solved in trac#1234.",
+            "Some issue is solved in #1234.",
             tm.parse_body(
                 description="Some issue is solved in #1234.",
                 ticket_mapping={123: 'some_url/234'},
@@ -526,16 +543,16 @@ class TestCommentGeneration(unittest.TestCase):
         trac_data = [{
             't_id': 3928,
             'c_time': 1489439926524055,
-            'author': 'mthuurne',
+            'author': 'someone@google.com',
             'field': 'comment',
             'oldvalue': '12.13',
-            'newvalue': 'Thanks.',
+            'newvalue': 'Thanks. some-email@google.com',
             }]
         desired_body = (
-            '|[<img alt="mthuurne\'s avatar" src="https://avatars.githubusercontent.com/u/246676?s=50" width="50" height="50">](https://github.com/mthuurne)<a name="note_13"></a>|@mthuurne commented|\n'
+            '|<img alt="someone@...\'s avatar" src="https://avatars.githubusercontent.com/u/0?s=50" width="50" height="50"><a name="note_13"></a>|someone@... commented|\n'
             "|-|-|\n"
             "\n"
-            "Thanks."
+            "Thanks. some-email@..."
             )
 
         self.assertEqual(
@@ -651,30 +668,30 @@ class TestCommentGeneration(unittest.TestCase):
             {
                 't_id': 3928,
                 'c_time': 1489439926524055,
-                'author': 'andradaE',
+                'author': 'andradaE@google.com',
                 'field': 'owner',
                 'newvalue': '',
                 },
             {
                 't_id': 3928,
                 'c_time': 1489439926524055,
-                'author': 'andradaE',
+                'author': 'andradaE@google.com',
                 'field': 'status',
                 'newvalue': 'closed',
                 },
             {
                 't_id': 3928,
                 'c_time': 1489439926524055,
-                'author': 'andradaE',
+                'author': 'andradaE@google.com',
                 'field': 'comment',
                 'newvalue': 'Finally, this is done!',
                 },
             ]
 
         desired_body = (
-            "|<img alt=\"andradaE's avatar\" src=\"https://avatars.githubusercontent.com/u/0?s=50\" width=\"50\" height=\"50\">|"
-            "andradaE removed owner<br>"
-            "andradaE set status to `closed`|\n"
+            "|<img alt=\"andradaE@...'s avatar\" src=\"https://avatars.githubusercontent.com/u/0?s=50\" width=\"50\" height=\"50\">|"
+            "andradaE@... removed owner<br>"
+            "andradaE@... set status to `closed`|\n"
             "|-|-|\n"
             "\n"
             "Finally, this is done!"
@@ -685,6 +702,19 @@ class TestCommentGeneration(unittest.TestCase):
             tm.comment_from_trac_changes(
                 trac_data, ticket_mapping={}
                 )['github_comment']['body']
+            )
+
+    def test_sanitize_allowed_email(self):
+        """
+        An allowed e-mail is not sanitized.
+        """
+        self.assertEqual(
+            'forbidden@..., allowed@example.com',
+            tm.sanitize_email('forbidden@example.com, allowed@example.com')
+            )
+        self.assertEqual(
+            'allowed@example.com, forbidden@...',
+            tm.sanitize_email('allowed@example.com, forbidden@example.com')
             )
 
 
@@ -709,14 +739,14 @@ class TestGitHubRequest(unittest.TestCase):
                 'description': 'description',
                 'priority': 'high',
                 'keywords': 'feature, easy',
-                'reporter': 'danuker',
+                'reporter': 'danuker@forbidden.net',
                 't_id': 6,
                 't_type': 'task',
                 'time': 1288883091000000,
                 'changetime': 1360238496689890,
                 'branch': 'https://github.com/chevah/agent-1.5/pull/10',
                 'branch_author': 'somebody_i_used_to_know',
-                'cc': 'the_nsa',
+                'cc': 'the_nsa@forbidden.net',
                 'version': '2.0',
                 }],
             ticket_mapping={},
@@ -744,7 +774,7 @@ class TestGitHubRequest(unittest.TestCase):
         # Test just one metadata field (before `type__`).
         # The rest are tested in TestBody.
         self.assertEqual(
-            '|<img alt="danuker\'s avatar" src="https://avatars.githubusercontent.com/u/0?s=50" width="50" height="50">| danuker reported|\n'
+            '|<img alt="danuker@...\'s avatar" src="https://avatars.githubusercontent.com/u/0?s=50" width="50" height="50">| danuker@... reported|\n'
             '|-|-|\n'
             '|Trac ID|trac#6|\n'
             '|Type|task|\n'
@@ -758,6 +788,7 @@ class TestGitHubRequest(unittest.TestCase):
             '```\n'
             'trac-id__6 6\n',
             request.data['body'].split('type__', 1)[0])
+        self.assertNotIn('forbidden', request.data['body'])
 
 
 class TestNumberPredictor(unittest.TestCase):

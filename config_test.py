@@ -35,3 +35,7 @@ ATTACHMENT_ROOT = 'https://site.com/trunk/'
 # https://github.com/settings/tokens
 OAUTH_USER = 'danuker'
 OAUTH_TOKEN = 'ghp_qwertyuiop'
+
+ALLOWED_EMAILS = {
+    'allowed@example.com',
+    }

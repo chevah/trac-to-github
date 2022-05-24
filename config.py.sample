@@ -48,3 +48,18 @@ ATTACHMENT_ROOT = 'https://raw.githubusercontent.com/twisted/twistedmatrix.com-t
 # https://github.com/settings/tokens
 OAUTH_USER = 'danuker'
 OAUTH_TOKEN = 'ghp_qwertyuiop'
+
+# GitHub User to GitHub UID mapping for avatar and mention purposes.
+UID_MAPPING = {
+    'adiroiban': 204609,
+    'danuker': 74835,
+    }
+
+# E-mails for which not to censor the domain.
+ALLOWED_EMAILS = {
+    'ecdsa-sha2-nistp256-cert-v01@openssh.com',
+    'ecdsa-sha2-nistp384-cert-v01@openssh.com',
+    'ecdsa-sha2-nistp521-cert-v01@openssh.com',
+    'john.doe@example.com',
+    'romeo@montague.net',
+}

@@ -4,6 +4,7 @@
 # https://gist.github.com/jonmagic/5282384165e0f86ef105
 
 import datetime
+import difflib
 import pprint
 import re
 import requests
@@ -28,6 +29,9 @@ from trac2down import convert
 # Set to False to perform actual GitHub issue creation.
 DRY_RUN = True
 # DRY_RUN = False
+
+
+MAIL_REGEX = r'([a-zA-Z0-9_.+-]+)@([a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+)'
 
 
 def main():
@@ -106,16 +110,16 @@ def select_tickets(tickets):
     submitted_ids = get_tickets().keys()
     tickets = [t for t in tickets if t['t_id'] not in submitted_ids]
 
-    return [t for t in tickets if t['t_id'] in [
-        # 4536,  # a lot of changes
-        # 4258,  # Reopened
-        # 3621,  # Reopened, enhancement, link to another ticket
-        # 9300,  # Reopened -> new
-        # 9335,  # Reopened -> closed, milestone, code example
-        # 5786,  # First comment replies to ticket
-        # 6887,  # Enhancement, second comment replies to different ticket
-        10027,  # By Adi, enhancement, new milestoen, fixed
-        ]]
+    # return [t for t in tickets if t['t_id'] in [
+    #     # 6887,  # Enhancement, second comment replies to different ticket
+    #     # 3621,  # Reopened, enhancement, link to another ticket
+    #     # 4258,  # Reopened, attachment
+    #     # 4536,  # a lot of changes and attachments
+    #     # 6887,  # Enhancement, second comment replies to different ticket
+    #     # 9300,  # Reopened -> new
+    #     # 9335,  # Reopened -> closed, milestone, code example
+    #     # 10027,  # By Adi, enhancement, new milestoen, fixed
+    #     ]]
     return tickets
 
 
@@ -317,6 +321,7 @@ def comment_from_trac_changes(changes, ticket_mapping):
     """
     Convert a list of ticket changes occurring at the same time
     into a GitHub comment.
+    Censor e-mail domains, if they are not in an approved list.
     """
     # We only support one comment per change group.
     assert len([c for c in changes if c['field'] == 'comment']) <= 1, changes
@@ -365,7 +370,8 @@ def comment_from_trac_changes(changes, ticket_mapping):
     return {
         't_id': comment['t_id'],
         'github_comment': {
-            'created_at': isotime(comment['c_time']), 'body': body
+            'created_at': isotime(comment['c_time']),
+            'body': sanitize_email(body),
             }
         }
 
@@ -410,6 +416,8 @@ def get_GitHub_user(trac_user):
     """
     if trac_user is not None:
         trac_user = trac_user.replace('<automation>', 'Automation').split(' <', 1)[0]
+
+    trac_user = sanitize_email(trac_user)
 
     github_user, _ = config.USER_MAPPING.get(trac_user, (None, 'N/A'))
 
@@ -672,6 +680,18 @@ class GitHubRequest:
             'closed': closed,
             'milestone': self.getOrCreateMilestone(self.milestone)
             }
+        if len(body) > 65536:
+            raise ValueError(
+                'GitHub issue length limit is 65536 characters. '
+                f'Trac ticket {self.t_id} has {len(body)}.'
+                )
+
+        if 'labels' in self.data:
+            if any(label != label.lower() for label in self.data['labels']):
+                raise ValueError(
+                    f"All labels must be lowercase: {self.data['labels']}"
+                    )
+
         if assignees:
             self.data['assignee'] = assignees[0]
         self.data['created_at'] = created_at
@@ -696,6 +716,17 @@ class GitHubRequest:
         https://docs.github.com/en/rest/reference/issues#get-an-issue
         """
         url = f'https://api.github.com/repos/{self.owner}/{self.repo}/import/issues'
+        if (
+                'assignee' in self.data and
+                self.data['assignee'] not in config.ASSIGNABLE_USERS
+            ):
+            # Was deleted during the run.
+            print(f"Skipping assignee {self.data['assignee']}.")
+            self.data['assignee'] = None
+
+        if self.t_id not in all_comments:
+            all_comments[self.t_id] = []
+
         data = {
             'issue': self.data,
             'comments': [c['github_comment'] for c in all_comments[self.t_id]]
@@ -720,6 +751,24 @@ class GitHubRequest:
                     )
 
             if response.json()['status'] != 'imported':
+                if (
+                        'errors' in response.json() and
+                        'field' in response.json()['errors'][0] and
+                        response.json()['errors'][0]['field'] == 'assignee'
+                ):
+                    # Invalid assignee. Try again without.
+                    print(
+                        f'Error: Could not assign {self.data["assignee"]}. '
+                        'Removing from ASSIGNABLE_USERS for this run. '
+                        'Retrying this ticket.')
+                    try:
+                        config.ASSIGNABLE_USERS.remove(self.data['assignee'])
+                    except KeyError:
+                        # Already removed.
+                        pass
+                    self.data['assignee'] = None
+                    return self.submit(expected_number, all_comments, ticket_mapping)
+
                 response = debug_response(response)
 
             number = int(response.json()['issue_url'].rsplit('/', 1)[1])
@@ -749,6 +798,7 @@ class GitHubRequest:
                 )
             self.github_id = response.json()['id']
             print(f"Issue #{self.github_number} has GHID {self.github_id}.")
+        return response
 
     def trac_url(self):
         """
@@ -786,10 +836,20 @@ class GitHubRequest:
             url=f'https://api.github.com/repos/{config.OWNER}/{config.REPOSITORY}/milestones',
             data={'title': title}
             )
-        milestone_number = response.json()['number']
+        try:
+            milestone_number = response.json()['number']
 
-        with open('milestones_created.tsv', 'a') as f:
-            f.write('\t'.join([title, str(milestone_number)]) + '\n')
+            with open('milestones_created.tsv', 'a') as f:
+                f.write('\t'.join([title, str(milestone_number)]) + '\n')
+        except AttributeError as e:
+            if "'NoneType' object has no attribute 'json'" in str(e):
+                if DRY_RUN:
+                    # We must be in
+                    milestone_number = -1
+                else:
+                    raise
+            else:
+                raise
 
         cls.milestones[title] = milestone_number
         return milestone_number
@@ -845,6 +905,14 @@ def protected_request(
     In case of error, start the debugger.
     In case of nearing rate limit, sleep until it resets.
     """
+
+    # Breakpoint on exposed emails
+    original = str(data)
+    noemails = sanitize_email(original)
+    if original != noemails:
+        print(original)
+        print(''.join(difflib.context_diff(original, noemails)))
+        import pdb; pdb.set_trace()
 
     if DRY_RUN and debug:
         print(f"Would call {method} on {url} with data:")
@@ -929,7 +997,7 @@ def get_body(description, data, ticket_mapping):
         f"|Created|{showtime(data['time'])}|\n"
         f"{branch_message}"
         "\n"
-        f"{parse_body(description, ticket_mapping)}"
+        f"{sanitize_email(parse_body(description, ticket_mapping))}"
         f"{attachments_message}"
         f"{format_metadata(data)}"
         )
@@ -971,7 +1039,7 @@ def labels_from_type(ticket_type):
     if ticket_type.startswith('release blocker'):
         return {'release-blocker'}
 
-    return {ticket_type}
+    return {ticket_type.lower()}
 
 
 def get_assignees(owner):
@@ -1015,7 +1083,7 @@ def labels_from_component(component: str):
     if not component:
         return []
 
-    return [component]
+    return [component.lower()]
 
 
 def labels_from_keywords(keywords: Union[str, None]):
@@ -1028,7 +1096,7 @@ def labels_from_keywords(keywords: Union[str, None]):
     keywords = keywords.replace(',', ' ')
     keywords = keywords.split(' ')
 
-    return [kw for kw in keywords if kw]
+    return [kw.lower() for kw in keywords if kw]
 
 
 def labels_from_priority(priority):
@@ -1050,10 +1118,10 @@ def labels_from_status_and_resolution(status, resolution):
     if the status is not "assigned", "new", or "closed".
     """
     if status == 'closed' and resolution:
-        return {resolution}
+        return {resolution.lower()}
 
     if status:
-        return {status}
+        return {status.lower()}
 
     # There is no status nor resolution.
     return {}
@@ -1068,18 +1136,34 @@ def format_attachments(ticket_id, attachment_list):
         f"[{attachment['filename']}]"
         f"({get_attachment_path(config.ATTACHMENT_ROOT, ticket_id, attachment['filename'])})"
         f" ({attachment['size']} bytes) - "
-        f"added by {attachment['author']} "
+        f"added by {sanitize_email(attachment['author'])} "
         f"on {showtime(int(attachment['time']))} - "
         f"{attachment['description']}"
         for attachment in sorted(attachment_list, key=lambda a: a['time'])
         )
 
 
-def sanitize_email(user):
+def sanitize_email(text):
     """
-    Sanitize emails like Trac, by removing the domain.
+    Sanitize emails like Trac, by replacing the domain with 3 dots.
     """
-    return user.split('@', 1)[0]
+    if text is not None:
+        for match in re.findall(MAIL_REGEX, text, flags=re.MULTILINE):
+            text_match = f'{match[0]}@{match[1]}'
+            if match[0] in ['n', 'n-']:
+                # This is most likely an unescaped newline (\n)
+                # followed by a Python decorator (say @defer.inlineCallbacks).
+                continue
+            if match[1] == '...':
+                # Already sanitized this occurrence.
+                continue
+            if text_match in config.ALLOWED_EMAILS:
+                continue
+            if text_match in ['n' + m for m in config.ALLOWED_EMAILS]:
+                # An unescaped newline (\n) in addition to an allowed email.
+                continue
+            text = text.replace(text_match, f'{match[0]}@...')
+    return text
 
 
 def format_metadata(ticket_data):
@@ -1100,7 +1184,8 @@ def format_metadata(ticket_data):
         'keywords '
         'time '
         'changetime '
-        'version'
+        'version '
+        'owner'
         )
 
     def rename(field):
@@ -1112,8 +1197,9 @@ def format_metadata(ticket_data):
         Replace everything with underscores, for GitHub searchability.
         Then append the original value, to preserve meaning.
         """
+        value = sanitize_email(str(value))
         original = value
-        value = re.sub('[^a-zA-Z0-9]', '_', str(original))
+        value = re.sub('[^a-zA-Z0-9]', '_', original)
         return f'{value} {original}'
 
     renamed_data = {
@@ -1124,8 +1210,6 @@ def format_metadata(ticket_data):
     formatted = '\n'.join(f'{k}__{v}' for k, v in renamed_data.items())
     cc_input = ticket_data['cc'].split(', ') if ticket_data['cc'] else ''
     cc_output = ' '.join(f'cc__{sanitize_email(user)}' for user in cc_input)
-    sanitized_owner = process(sanitize_email(ticket_data["owner"]))
-    owner = f'owner__{sanitized_owner}'
     return (
         '\n'
         '\n'
@@ -1134,7 +1218,6 @@ def format_metadata(ticket_data):
         '```\n'
         f'{formatted}\n'
         f'{cc_output}\n'
-        f'{owner}\n'
         '```\n'
         '</details>\n'
         )
@@ -1184,6 +1267,7 @@ def convert_issue_content(text, ticket_mapping):
     """
     text = text.replace(config.TRAC_TICKET_PREFIX, '#')
     ticket_re = '#([0-9]+)'
+    text = update_changeset(text)
     for match in matches(ticket_re, text):
         try:
             github_url = ticket_mapping[int(match)]
@@ -1197,10 +1281,21 @@ def convert_issue_content(text, ticket_mapping):
             # We don't know this ticket. Warn about it.
             print(
                 f"Warning: ticket #{match} not in tickets_expected_gold.tsv"
-                f" - using trac#{match}")
-            text = sub(f'#{match}', f'trac#{match}', text)
+                f" - leaving it as #{match}")
 
     return convert(text, base_path='')
+
+
+def update_changeset(text):
+    """
+    Converts Trac changeset format to unquoted commit hash,
+    which is linked by GitHub automatically.
+    """
+    return re.sub(
+        'In \[changeset:"([a-f0-9]+)" [a-f0-9]+\]:',
+        'In changeset \\1',
+        text
+        )
 
 
 def parse_curly(description, ticket_mapping):
