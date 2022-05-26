@@ -183,7 +183,7 @@ class TestBody(unittest.TestCase):
             "|Trac ID|trac#4419|\n"
             "|Type|release blocker: release process bug|\n"
             "|Created|1970-01-01 00:00:00Z|\n"
-            "|Branch|4419-some-branch-somewhere|\n"
+            "|Branch|https://github.com/chevah/trac-migration-staging/tree/4419-some-branch-somewhere|\n"
             "\n"
             "The ticket description. Some ```monospaced``` text.\n"
             "\n"
@@ -262,6 +262,37 @@ class TestBody(unittest.TestCase):
                     },
                 ticket_mapping={},
                 )
+            )
+
+    def test_branch_link(self):
+        """
+        Branch links are converted from various formats to simple links.
+        Links are automatically formatted by GitHub.
+        """
+        # A branch name.
+        self.assertEqual(
+            'https://github.com/chevah/trac-migration-staging/tree/10286-pwd-checkers-types',
+            tm.branch_link('10286-pwd-checkers-types')
+            )
+        # A branch name prefixed with `/branches/`.
+        self.assertEqual(
+            'https://github.com/chevah/trac-migration-staging/tree/10286-pwd-checkers-types',
+            tm.branch_link('/branches/10286-pwd-checkers-types')
+            )
+        # A branch name prefixed with `branches/`.
+        self.assertEqual(
+            'https://github.com/chevah/trac-migration-staging/tree/10286-pwd-checkers-types',
+            tm.branch_link('branches/10286-pwd-checkers-types')
+            )
+        # A branch name that includes a different username.
+        self.assertEqual(
+            'https://github.com/dstufft/trac-migration-staging/tree/8900-dstufft-undefer',
+            tm.branch_link('dstufft:8900-dstufft-undefer')
+            )
+        # A branch URL.
+        self.assertEqual(
+            'https://github.com/twisted/twisted-trac-migration/tree/10286-pwd-checkers-types',
+            tm.branch_link('https://github.com/twisted/twisted-trac-migration/tree/10286-pwd-checkers-types')
             )
 
 
@@ -744,7 +775,7 @@ class TestGitHubRequest(unittest.TestCase):
                 't_type': 'task',
                 'time': 1288883091000000,
                 'changetime': 1360238496689890,
-                'branch': 'https://github.com/chevah/agent-1.5/pull/10',
+                'branch': '10286-pwd-checkers-types',
                 'branch_author': 'somebody_i_used_to_know',
                 'cc': 'the_nsa@forbidden.net',
                 'version': '2.0',
@@ -779,7 +810,7 @@ class TestGitHubRequest(unittest.TestCase):
             '|Trac ID|trac#6|\n'
             '|Type|task|\n'
             '|Created|2010-11-04 15:04:51Z|\n'
-            '|Branch|https://github.com/chevah/agent-1.5/pull/10|\n'
+            '|Branch|https://github.com/chevah/trac-migration-staging/tree/10286-pwd-checkers-types|\n'
             '\n'
             'description\n'
             '\n'

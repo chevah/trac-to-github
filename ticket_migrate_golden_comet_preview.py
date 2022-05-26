@@ -110,16 +110,17 @@ def select_tickets(tickets):
     submitted_ids = get_tickets().keys()
     tickets = [t for t in tickets if t['t_id'] not in submitted_ids]
 
-    # return [t for t in tickets if t['t_id'] in [
-    #     # 6887,  # Enhancement, second comment replies to different ticket
-    #     # 3621,  # Reopened, enhancement, link to another ticket
-    #     # 4258,  # Reopened, attachment
-    #     # 4536,  # a lot of changes and attachments
-    #     # 6887,  # Enhancement, second comment replies to different ticket
-    #     # 9300,  # Reopened -> new
-    #     # 9335,  # Reopened -> closed, milestone, code example
-    #     # 10027,  # By Adi, enhancement, new milestoen, fixed
-    #     ]]
+    return [t for t in tickets if t['t_id'] in [
+        # 6887,  # Enhancement, second comment replies to different ticket
+        # 3621,  # Reopened, enhancement, link to another ticket
+        # 4258,  # Reopened, attachment
+        # 4536,  # a lot of changes and attachments
+        # 6887,  # Enhancement, second comment replies to different ticket
+        # 9300,  # Reopened -> new
+        # 9335,  # Reopened -> closed, milestone, code example
+        # 10027,  # By Adi, enhancement, new milestoen, fixed
+        8900,  # Branch from other user
+        ]]
     return tickets
 
 
@@ -969,6 +970,26 @@ def wait_for_rate_reset(response):
         time.sleep(to_sleep)
 
 
+def branch_link(raw_branch):
+    if '://' in raw_branch:
+        # We leave URLs alone.
+        return raw_branch
+
+    # Attempt to parse into GitHub branch link.
+    branchname = raw_branch
+    owner = config.OWNER
+
+    matches = re.search('branches/(.*)', raw_branch)
+    if matches:
+        branchname = matches[1]
+
+    if ':' in branchname:
+        owner, branchname = branchname.split(':')
+
+    return f'https://github.com/{owner}/{config.REPOSITORY}/tree/{branchname}'
+
+
+
 def get_body(description, data, ticket_mapping):
     """
     Generate the ticket description body for GitHub.
@@ -977,7 +998,7 @@ def get_body(description, data, ticket_mapping):
 
     branch_message = ''
     if data['branch']:
-        branch_message = f"|Branch|{data['branch']}|\n"
+        branch_message = f"|Branch|{branch_link(data['branch'])}|\n"
 
     attachments_message = ''
     if 'attachments' in data and data['attachments']:
