@@ -1116,8 +1116,8 @@ def labels_from_keywords(keywords: Union[str, None]):
 
     keywords = keywords.replace(',', ' ')
     keywords = keywords.split(' ')
-
-    return [kw.lower() for kw in keywords if kw]
+    keywords = [kw.lower() for kw in keywords if kw]
+    return [kw for kw in keywords if kw in config.ALLOWED_KEYWORDS]
 
 
 def labels_from_priority(priority):

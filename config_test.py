@@ -39,3 +39,11 @@ OAUTH_TOKEN = 'ghp_qwertyuiop'
 ALLOWED_EMAILS = {
     'allowed@example.com',
     }
+
+ALLOWED_KEYWORDS = {
+    'documentation',
+    'twistd',
+    'review',
+    'windows',
+    'tests',
+    }

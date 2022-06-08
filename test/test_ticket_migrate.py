@@ -21,17 +21,27 @@ class TestLabelMapping(unittest.TestCase):
         """
         # Split by space or comma.
         self.assertEqual(
-            ['easy', 'tech-debt'],
-            tm.labels_from_keywords('easy tech-debt'))
+            ['windows', 'tests'],
+            tm.labels_from_keywords('windows tests'))
         self.assertEqual(
-            ['easy', 'tech-debt'],
-            tm.labels_from_keywords('easy,tech-debt'))
+            ['windows', 'tests'],
+            tm.labels_from_keywords('windows,tests'))
 
         # Remove commas.
-        self.assertEqual(['tech-debt'], tm.labels_from_keywords('tech-debt,'))
+        self.assertEqual(['tests'], tm.labels_from_keywords('tests,'))
         self.assertEqual(
-            ['tech-debt', 'feature'],
-            tm.labels_from_keywords('tech-debt, feature'))
+            ['windows', 'tests'],
+            tm.labels_from_keywords('windows, tests'))
+
+        # Lowercase labels.
+        self.assertEqual(
+            ['windows', 'tests'],
+            tm.labels_from_keywords('Windows, Tests'))
+
+        # Only keep allowed keywords.
+        self.assertEqual(
+            ['tests'],
+            tm.labels_from_keywords('tech-debt, Tests'))
 
         # Handles None correctly.
         self.assertEqual(
@@ -46,19 +56,19 @@ class TestLabelMapping(unittest.TestCase):
             [],
             tm.labels_from_keywords(', , ,,  '))
         self.assertEqual(
-            ['priority-normal', 'tag'],
-            tm.get_labels(keywords='tag, ,tag ,,tag  '))
+            ['priority-normal', 'tests'],
+            tm.get_labels(keywords='tests, ,tests ,,Tests  '))
 
     def test_get_labels_none(self):
         """
         When priority field is missing, it is automatically assigned "normal".
         """
         self.assertEqual(
-            ['client', 'priority-low', 'tech-debt'],
+            ['client', 'priority-low', 'tests'],
             tm.get_labels(
                 component='client',
                 priority='Low',
-                keywords='tech-debt',
+                keywords='tests',
                 status='',
                 resolution='',
                 ))
@@ -769,7 +779,7 @@ class TestGitHubRequest(unittest.TestCase):
                 'summary': 'summary',
                 'description': 'description',
                 'priority': 'high',
-                'keywords': 'feature, easy',
+                'keywords': 'windows, tests',
                 'reporter': 'danuker@forbidden.net',
                 't_id': 6,
                 't_type': 'task',
@@ -792,12 +802,12 @@ class TestGitHubRequest(unittest.TestCase):
         self.assertEqual('adiroiban', request.data['assignee'])
         self.assertEqual(
             [
-                'easy',
-                'feature',
                 'priority-high',
                 'task',
+                'tests',
                 'trac-migration-staging',
-                'wontfix'
+                'windows',
+                'wontfix',
                 ],
             request.data['labels'])
         self.assertEqual('summary', request.data['title'])
