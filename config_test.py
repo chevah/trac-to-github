@@ -20,6 +20,7 @@ ASSIGNABLE_USERS = {
     }
 
 TRAC_TICKET_PREFIX = 'https://trac.chevah.com/ticket/'
+MIGRATED_WIKI_PREFIX = 'https://example.org/wiki/'
 
 # GitHub repository for Trac tickets.
 REPOSITORY = 'trac-migration-staging'

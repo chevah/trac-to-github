@@ -5,7 +5,7 @@
 DBNAME=trac
 
 # Export takes ~1 minute
-for table_name in attachment ticket ticket_change ticket_custom session session_attribute
+for table_name in attachment ticket ticket_change ticket_custom session session_attribute milestone
 do
   pg_dump --file "results_dump.sql" --no-password --verbose --format=p --create --clean --disable-dollar-quoting --inserts --column-inserts --section=pre-data --section=data --no-owner  --table "public.${table_name}" $DBNAME
 

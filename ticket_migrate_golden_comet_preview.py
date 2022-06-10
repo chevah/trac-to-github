@@ -62,7 +62,7 @@ def main():
                 )
             for created_time in comments_by_ticket_and_time[t_id]
             ]
-        for t_id in comments_by_ticket_and_time
+        for t_id in comments_by_ticket_and_time if t_id in to_submit
         }
 
     # Parse tickets into GitHub issue objects.
@@ -119,7 +119,8 @@ def select_tickets(tickets):
         # 9300,  # Reopened -> new
         # 9335,  # Reopened -> closed, milestone, code example
         # 10027,  # By Adi, enhancement, new milestoen, fixed
-        8900,  # Branch from other user
+        # 8900,  # Branch from other user
+        5675,  # Wiki link, milestone with wiki link, attachments
         ]]
     return tickets
 
@@ -247,6 +248,19 @@ def read_trac_comments():
                 'oldvalue': oldvalue,
                 'newvalue': newvalue,
                 }
+
+
+def read_trac_milestone_descriptions():
+    """
+    Read the Trac milestone descriptions from the database.
+    """
+    milestone_descriptions = {}
+    with get_db() as db:
+        for row in db.execute(
+                "SELECT * FROM milestone;"):
+            name, _, _, description = row
+            milestone_descriptions[name] = description
+    return milestone_descriptions
 
 
 def read_trac_attachments():
@@ -660,6 +674,8 @@ class GitHubRequest:
     """
     # Cache for milestone title -> GitHub ID.
     milestones = {}
+    # Cache for milestone title -> description.
+    milestoneDescriptions = {}
 
     def __init__(
             self, owner, repo, trac_id,
@@ -671,7 +687,6 @@ class GitHubRequest:
         self.t_id = trac_id
         self.closed = closed
         self.resolution = resolution
-        self.milestone = milestone
 
         # Data to submit to GitHub.
         self.data = {
@@ -679,7 +694,7 @@ class GitHubRequest:
             'body': body,
             'labels': labels,
             'closed': closed,
-            'milestone': self.getOrCreateMilestone(self.milestone)
+            'milestone': milestone
             }
         if len(body) > 65536:
             raise ValueError(
@@ -808,7 +823,7 @@ class GitHubRequest:
         return config.TRAC_TICKET_PREFIX + str(self.t_id)
 
     @classmethod
-    def getOrCreateMilestone(cls, title):
+    def getOrCreateMilestone(cls, title, ticket_mapping):
         """
         If a GitHub milestone exists named like the Trac one, return its ID,
         otherwise create it and return its ID.
@@ -832,10 +847,18 @@ class GitHubRequest:
                     cls.milestones[title] = int(number)
                     return int(number)
 
+        description = parse_body(
+            cls.getMilestoneDescription(title), ticket_mapping=ticket_mapping
+            )
+
         # We have not created the project. Create it.
         response = protected_request(
             url=f'https://api.github.com/repos/{config.OWNER}/{config.REPOSITORY}/milestones',
-            data={'title': title}
+            data={
+                'title': title,
+                'description': description,
+                'state': 'closed',
+                }
             )
         try:
             milestone_number = response.json()['number']
@@ -845,7 +868,8 @@ class GitHubRequest:
         except AttributeError as e:
             if "'NoneType' object has no attribute 'json'" in str(e):
                 if DRY_RUN:
-                    # We must be in
+                    # We must be in a debugger.
+                    # Allow continuation, for seeing what will happen further.
                     milestone_number = -1
                 else:
                     raise
@@ -854,6 +878,15 @@ class GitHubRequest:
 
         cls.milestones[title] = milestone_number
         return milestone_number
+
+    @classmethod
+    def getMilestoneDescription(cls, title):
+        if title in cls.milestoneDescriptions:
+            return cls.milestoneDescriptions[title]
+
+        cls.milestoneDescriptions = read_trac_milestone_descriptions()
+        return cls.milestoneDescriptions[title]
+
 
     @classmethod
     def fromTracData(
@@ -880,7 +913,8 @@ class GitHubRequest:
                 ),
             closed=kwargs['status'] == 'closed',
             resolution=kwargs['resolution'],
-            milestone=kwargs['milestone'],
+            milestone=cls.getOrCreateMilestone(
+                kwargs['milestone'], ticket_mapping=ticket_mapping),
             labels=get_labels(**kwargs),
             assignees=assignees,
             created_at=isotime(kwargs['time']),
@@ -1304,7 +1338,7 @@ def convert_issue_content(text, ticket_mapping):
                 f"Warning: ticket #{match} not in tickets_expected_gold.tsv"
                 f" - leaving it as #{match}")
 
-    return convert(text, base_path='')
+    return convert(text, base_path='', wiki_prefix=config.MIGRATED_WIKI_PREFIX)
 
 
 def update_changeset(text):

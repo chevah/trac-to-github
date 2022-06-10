@@ -463,6 +463,57 @@ class TestParseBody(unittest.TestCase):
                 )
             )
 
+    def test_wiki_link(self):
+        """
+        Wiki links are replaced with links to the configured URL.
+        """
+        self.assertEqual(
+            "[EDNS is an extended DNS](https://example.org/wiki/EDNS0)",
+            tm.parse_body(
+                "[wiki:EDNS0 EDNS is an extended DNS]",
+                ticket_mapping={},
+                )
+            )
+        self.assertEqual(
+            "[EDNS0](https://example.org/wiki/EDNS0) is an extended DNS",
+            tm.parse_body(
+                "[wiki:EDNS0] is an extended DNS",
+                ticket_mapping={},
+                )
+            )
+        self.assertEqual(
+            "[EDNS0](https://example.org/wiki/EDNS0) is an extended DNS",
+            tm.parse_body(
+                "wiki:EDNS0 is an extended DNS",
+                ticket_mapping={},
+                )
+            )
+        self.assertEqual(
+            "[Pending planning](https://example.org/wiki/Plan/TwistedWebHTTP20)",
+            tm.parse_body(
+                "[wiki:Plan/TwistedWebHTTP20 Pending planning]",
+                ticket_mapping={},
+                )
+            )
+        self.assertEqual(
+            "See:\n"
+            "* [EDNS0#NewDNSSECRecordsandLookupMethods]"
+            "(https://example.org/wiki/EDNS0#NewDNSSECRecordsandLookupMethods)",
+            tm.parse_body(
+                "See:\n"
+                "* wiki:EDNS0#NewDNSSECRecordsandLookupMethods",
+                ticket_mapping={},
+                )
+            )
+        self.assertEqual(
+            "[TwistedNames](https://example.org/wiki/TwistedNames), "
+            "followed by a comma",
+            tm.parse_body(
+                "wiki:TwistedNames, followed by a comma",
+                ticket_mapping={},
+                )
+            )
+
     def test_anchor_links_removed(self):
         """
         Remove anchor links, since they will not be preserved in GitHub.

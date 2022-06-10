@@ -73,13 +73,14 @@ The script to use is `ticket_migrate_golden_comet_preview.py`.
   using `postgres-to-sqlite.sh`.
   * scp postgres-to-sqlite.sh user@your-server.com:/tmp/postgres-to-sqlite_`date -I`.sh
   * ssh user@trac-server.com
-  * sudo su trac && cd /tmp
-  * ./postgres-to-sqlite_`date -I`.sh  # Assuming no date difference due to timezone
+  * sudo su trac
+  * cd /tmp
+  * ./postgres-to-sqlite_`date -I`.sh  # Will take ~1 minute for ~10k tickets.
   * ^D # Exit su trac
   * ^D # Close SSH
   * scp user@trac-server.com:/tmp/results.sqlite3 results-`date -I`.sqlite3  # About 70M for 10346 tickets
 * Create required files:
-  `touch tickets_created.tsv && touch tickets_expected_gold.tsv`
+  `touch tickets_created.tsv && touch tickets_expected_gold.tsv && touch milestones_created`
 * Modify `select_tickets` to your liking.
   Perform a dry run, generating `tickets_expected.tsv`.
 * Once the system generated the desired `tickets_expected.tsv`,
