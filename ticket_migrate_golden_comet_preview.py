@@ -749,7 +749,7 @@ class GitHubRequest:
             }
 
         response = protected_request(
-            url=url, data=data, expected_status_code=202)
+            url=url, data=data, expected_status_codes=(202,))
 
         if response:
             # Remember the GitHub URL assigned to each ticket.
@@ -763,7 +763,7 @@ class GitHubRequest:
                     url=check_url,
                     data=None,
                     method=requests.get,
-                    expected_status_code=200
+                    expected_status_codes=(200,)
                     )
 
             if response.json()['status'] != 'imported':
@@ -806,12 +806,20 @@ class GitHubRequest:
                     f"close the issue if needed, "
                     f"and then restart the script."
                     )
-            response = protected_request(
-                url=response.json()['issue_url'],
-                data=None,
-                method=requests.get,
-                expected_status_code=200
-                )
+
+            # There is a risk of GitHub reporting that the import job is done,
+            # but accessing the issue immediately after returns a 404.
+            created = False
+            issue_api_url = response.json()['issue_url']
+            while not created:
+                response = protected_request(
+                    url=issue_api_url,
+                    data=None,
+                    method=requests.get,
+                    expected_status_codes=(200, 404)
+                    )
+                if response.status_code == 200:
+                    created = True
             self.github_id = response.json()['id']
             print(f"Issue #{self.github_number} has GHID {self.github_id}.")
         return response
@@ -933,7 +941,7 @@ class GitHubRequest:
 
 
 def protected_request(
-        url, data, method=requests.post, expected_status_code=201, debug=True):
+        url, data, method=requests.post, expected_status_codes=(201,), debug=True):
     """
     Send a request if DRY_RUN is not truthy.
 
@@ -955,8 +963,6 @@ def protected_request(
         return
 
     # Import takes more than 0.2 seconds. Avoid checking excessively.
-    # There is a risk of GitHub reporting that the import job is done,
-    # but accessing the issue immediately after returns a 404.
     # Also, there may be a risk of secondary rate limit:
     # https://docs.github.com/en/rest/guides/best-practices-for-integrators#dealing-with-secondary-rate-limits
     time.sleep(0.5)
@@ -968,11 +974,14 @@ def protected_request(
         auth=(config.OAUTH_USER, config.OAUTH_TOKEN)
         )
 
-    if response.status_code != expected_status_code and debug:
+    if (response.status_code not in expected_status_codes) and debug:
         print(f'Error: {method} request failed!')
         debug_response(response)
-
-    wait_for_rate_reset(response)
+    try:
+        wait_for_rate_reset(response)
+    except KeyError:
+        # No rate limit headers?
+        import pdb; pdb.set_trace()
 
     return response
 
