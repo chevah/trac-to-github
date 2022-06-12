@@ -53,7 +53,7 @@ def main():
         read_trac_comments(),
         )
     comments_by_ticket_and_time = group_comments(raw_comments)
-
+    trac_numbers = [t['t_id'] for t in to_submit]
     comments = {
         t_id: [
             comment_from_trac_changes(
@@ -62,7 +62,7 @@ def main():
                 )
             for created_time in comments_by_ticket_and_time[t_id]
             ]
-        for t_id in comments_by_ticket_and_time if t_id in to_submit
+        for t_id in comments_by_ticket_and_time if t_id in trac_numbers
         }
 
     # Parse tickets into GitHub issue objects.
@@ -110,18 +110,19 @@ def select_tickets(tickets):
     submitted_ids = get_tickets().keys()
     tickets = [t for t in tickets if t['t_id'] not in submitted_ids]
 
-    return [t for t in tickets if t['t_id'] in [
-        # 6887,  # Enhancement, second comment replies to different ticket
-        # 3621,  # Reopened, enhancement, link to another ticket
-        # 4258,  # Reopened, attachment
-        # 4536,  # a lot of changes and attachments
-        # 6887,  # Enhancement, second comment replies to different ticket
-        # 9300,  # Reopened -> new
-        # 9335,  # Reopened -> closed, milestone, code example
-        # 10027,  # By Adi, enhancement, new milestoen, fixed
-        # 8900,  # Branch from other user
-        5675,  # Wiki link, milestone with wiki link, attachments
-        ]]
+    # return [t for t in tickets if t['t_id'] in [
+    #     # 6887,  # Enhancement, second comment replies to different ticket
+    #     # 3621,  # Reopened, enhancement, link to another ticket
+    #     # 4258,  # Reopened, attachment
+    #     # 4536,  # a lot of changes and attachments
+    #     # 6887,  # Enhancement, second comment replies to different ticket
+    #     # 9300,  # Reopened -> new
+    #     # 9335,  # Reopened -> closed, milestone, code example
+    #     # 10027,  # By Adi, enhancement, new milestoen, fixed
+    #     # 8900,  # Branch from other user
+    #     # 5675,  # Wiki link, milestone with wiki link, attachments
+    #     4778,  # Next in line
+    #     ]]
     return tickets
 
 
@@ -965,7 +966,7 @@ def protected_request(
     # Import takes more than 0.2 seconds. Avoid checking excessively.
     # Also, there may be a risk of secondary rate limit:
     # https://docs.github.com/en/rest/guides/best-practices-for-integrators#dealing-with-secondary-rate-limits
-    time.sleep(0.5)
+    time.sleep(0.2)
 
     response = method(
         url=url,
@@ -992,7 +993,6 @@ def debug_response(response):
     """
     print(response)
     pprint.pprint(dict(response.headers))
-    pprint.pprint(response.json())
     import pdb
     pdb.set_trace()
     print('Done debugging!')
