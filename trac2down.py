@@ -21,7 +21,7 @@ from pprint import pprint
 from sys import exit
 
 
-def convert(text, base_path, multilines=False, note_map={}, attachments_path=None, svn2git_revisions={}):
+def convert(text, base_path, wiki_prefix, multilines=False, note_map={}, attachments_path=None, svn2git_revisions={}):
     text = re.sub('\r\n', '\n', text)
     text = re.sub(r'{{{(.*?)}}}', r'`\1`', text)
     text = re.sub(r'(?sm){{{(\n?#![^\n]+)?\n(.*?)\n}}}', r'```\n\2\n```', text)
@@ -214,8 +214,9 @@ def convert(text, base_path, multilines=False, note_map={}, attachments_path=Non
         # not blockquote?
         if not line.startswith('    '):
             line = re.sub(r'\[(https?://[^\s\[\]]+)\s([^\[\]]+)\]', r'[\2](\1)', line)
-            line = re.sub(r'\[wiki:([^\s\[\]]+)\s([^\[\]]+)\]', r'[\2](%s/\1)' % os.path.relpath('/wikis/', base_path), line)
-            line = re.sub(r'\[wiki:([^\s\[\]]+)\]', r'[\1](\1)', line)
+            line = re.sub(r'\[wiki:([A-Za-z0-9/#]+) ([^\]]+)\]', r'[\2](%s\1)' % wiki_prefix, line)  # [wiki:WikiName Friendly name] format
+            line = re.sub(r'\[wiki:([A-Za-z0-9/#]+)\]', r'[\1](%s\1)' % wiki_prefix, line)  # [wiki:WikiName] format
+            line = re.sub(r'wiki:([A-Za-z0-9/#]+)', r'[\1](%s\1)' % wiki_prefix, line)  # wiki:WikiName format
             line = re.sub(r'\!(([A-Z][a-z0-9]+){2,})', r'\1', line)
 
             line = source_re.sub(source_replace, line)

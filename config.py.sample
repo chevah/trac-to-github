@@ -4,6 +4,17 @@ USER_MAPPING = {
     'danuker': ('danuker', 'Dan Haiduc <danuthaiduc@gmail.com>'),
     }
 
+# GitHub User to GitHub UID mapping (for avatar purposes).
+UID_MAPPING = {
+    'adiroiban': 204609,
+    }
+
+# Users that are allowed by GitHub
+# to be assignees of issues in the target repositories.
+ASSIGNABLE_USERS = {
+    'adiroiban',
+    }
+
 TRAC_TICKET_PREFIX = 'https://trac.chevah.com/ticket/'
 
 # None or a tuple of (name, email)
@@ -37,3 +48,18 @@ ATTACHMENT_ROOT = 'https://raw.githubusercontent.com/twisted/twistedmatrix.com-t
 # https://github.com/settings/tokens
 OAUTH_USER = 'danuker'
 OAUTH_TOKEN = 'ghp_qwertyuiop'
+
+# GitHub User to GitHub UID mapping for avatar and mention purposes.
+UID_MAPPING = {
+    'adiroiban': 204609,
+    'danuker': 74835,
+    }
+
+# E-mails for which not to censor the domain.
+ALLOWED_EMAILS = {
+    'ecdsa-sha2-nistp256-cert-v01@openssh.com',
+    'ecdsa-sha2-nistp384-cert-v01@openssh.com',
+    'ecdsa-sha2-nistp521-cert-v01@openssh.com',
+    'john.doe@example.com',
+    'romeo@montague.net',
+}

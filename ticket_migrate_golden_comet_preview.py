@@ -4,12 +4,15 @@
 # https://gist.github.com/jonmagic/5282384165e0f86ef105
 
 import datetime
+import difflib
 import pprint
+import re
 import requests
 import sqlite3
 import sys
 import time
 from collections import deque, defaultdict
+from itertools import chain
 from typing import Union
 
 from attachment_links import get_attachment_path
@@ -25,18 +28,10 @@ from trac2down import convert
 
 # Set to False to perform actual GitHub issue creation.
 DRY_RUN = True
+# DRY_RUN = False
 
 
-def attach_attachments(tickets, attachments):
-    """
-    Augment each ticket entry with a list of its attachments.
-    """
-    tickets_to_attachments = defaultdict(lambda: [])
-    for a in attachments:
-        tickets_to_attachments[a['t_id']].append(a)
-
-    for t in tickets:
-        t['attachments'] = tickets_to_attachments[str(t['t_id'])]
+MAIL_REGEX = r'([a-zA-Z0-9_.+-]+)@([a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+)'
 
 
 def main():
@@ -44,7 +39,6 @@ def main():
     Read the Trac DB and post the tickets to GitHub.
     """
     to_submit = list(select_tickets(read_trac_tickets()))
-    comments = list(read_trac_comments())
     submitted_already = get_tickets('tickets_created.tsv').values()
     np = NumberPredictor()
     attach_attachments(tickets=to_submit, attachments=read_trac_attachments())
@@ -53,6 +47,23 @@ def main():
         )
 
     ticket_mapping = get_ticket_mapping(to_submit, expected_numbers)
+    raw_comments = chain(
+        read_trac_owner_changes(),
+        read_trac_status_changes(),
+        read_trac_comments(),
+        )
+    comments_by_ticket_and_time = group_comments(raw_comments)
+    trac_numbers = [t['t_id'] for t in to_submit]
+    comments = {
+        t_id: [
+            comment_from_trac_changes(
+                comments_by_ticket_and_time[t_id][created_time],
+                ticket_mapping
+                )
+            for created_time in comments_by_ticket_and_time[t_id]
+            ]
+        for t_id in comments_by_ticket_and_time if t_id in trac_numbers
+        }
 
     # Parse tickets into GitHub issue objects.
     issues = list(GitHubRequest.fromTracDataMultiple(
@@ -71,9 +82,22 @@ def main():
             all_comments=comments,
             ticket_mapping=ticket_mapping
             )
-        issue.submitToProject()
 
     print("Issue creation complete. You may now manually open issues and PRs.")
+
+
+def group_comments(raw_comments):
+    """
+    Group comments by ticket and time.
+    """
+    comments_by_ticket = defaultdict(lambda: [])
+    for c in raw_comments:
+        comments_by_ticket[c['t_id']].append(c)
+    comments_by_ticket_and_time = defaultdict(lambda: defaultdict(lambda: []))
+    for t_id in comments_by_ticket:
+        for c in comments_by_ticket[t_id]:
+            comments_by_ticket_and_time[t_id][c['c_time']].append(c)
+    return comments_by_ticket_and_time
 
 
 def select_tickets(tickets):
@@ -86,7 +110,19 @@ def select_tickets(tickets):
     submitted_ids = get_tickets().keys()
     tickets = [t for t in tickets if t['t_id'] not in submitted_ids]
 
-    # return [t for t in tickets if t['t_id'] == 4419]
+    # return [t for t in tickets if t['t_id'] in [
+    #     # 6887,  # Enhancement, second comment replies to different ticket
+    #     # 3621,  # Reopened, enhancement, link to another ticket
+    #     # 4258,  # Reopened, attachment
+    #     # 4536,  # a lot of changes and attachments
+    #     # 6887,  # Enhancement, second comment replies to different ticket
+    #     # 9300,  # Reopened -> new
+    #     # 9335,  # Reopened -> closed, milestone, code example
+    #     # 10027,  # By Adi, enhancement, new milestoen, fixed
+    #     # 8900,  # Branch from other user
+    #     # 5675,  # Wiki link, milestone with wiki link, attachments
+    #     4778,  # Next in line
+    #     ]]
     return tickets
 
 
@@ -105,7 +141,7 @@ def get_ticket_mapping(tickets, expected_numbers):
 
 def get_tickets(filename='tickets_created.tsv'):
     """
-    Reads the tickets_create.tsv, and returns a dictionary of
+    Reads the tickets_created.tsv, and returns a dictionary of
     Trac ID -> GitHub URL of tickets that were sent to GitHub already.
     """
     created_tickets = {}
@@ -125,24 +161,27 @@ def read_trac_tickets():
     """
     db = get_db()
 
-    # Only take the last branch change.
-    # For example, https://trac.chevah.com/ticket/85 has multiple changes,
-    # and the last one is to GH PR 238.
-    # We use GROUP BY because SQLite has no DISTINCT ON.
+    # Select the last change for `branch` and `branch_author`.
+    # In SQLite, there is no DISTINCT ON respecting order,
+    # but max(time) forces the other row fields to be the most up to date.
     # https://www.sqlite.org/quirks.html#aggregate_queries_can_contain_non_aggregate_result_columns_that_are_not_in_the_group_by_clause
-    for row in db.execute(
-            """\
-            SELECT *
-            FROM
-              (SELECT *
-               FROM ticket
-               LEFT JOIN ticket_change ON ticket.id = ticket_change.ticket
-               AND ticket_change.field = 'branch'
-               AND ticket_change.newvalue LIKE '%github%'
-               ORDER BY ticket.id,
-                        ticket_change.time DESC)
-            GROUP BY id;
-            """):
+    ticket_branches = {}
+    ticket_branch_authors = {}
+    for changerow in db.execute(
+            """
+            SELECT max(time), ticket, field, newvalue 
+            FROM ticket_change 
+            WHERE field in ('branch', 'branch_author') 
+            GROUP BY ticket, field;
+            """
+            ):
+        changetime, change_ticketid, field, value = changerow
+        if field == 'branch':
+            ticket_branches[change_ticketid] = value
+        if field == 'branch_author':
+            ticket_branch_authors[change_ticketid] = value
+
+    for row in db.execute("SELECT * FROM ticket;"):
         (
             t_id,
             t_type,
@@ -161,12 +200,6 @@ def read_trac_tickets():
             summary,
             description,
             keywords,
-            _ticket,
-            _time,
-            _author,
-            _field,
-            _oldvalue,
-            _newvalue,
             ) = row
 
         yield {
@@ -187,7 +220,8 @@ def read_trac_tickets():
             'summary': summary,
             'description': description,
             'keywords': keywords,
-            'branch': _newvalue,
+            'branch': ticket_branches.get(t_id, ''),
+            'branch_author': ticket_branch_authors.get(t_id, ''),
             }
 
 
@@ -217,6 +251,19 @@ def read_trac_comments():
                 }
 
 
+def read_trac_milestone_descriptions():
+    """
+    Read the Trac milestone descriptions from the database.
+    """
+    milestone_descriptions = {}
+    with get_db() as db:
+        for row in db.execute(
+                "SELECT * FROM milestone;"):
+            name, _, _, description = row
+            milestone_descriptions[name] = description
+    return milestone_descriptions
+
+
 def read_trac_attachments():
     """
     Read the Trac attachment data from the database.
@@ -234,6 +281,176 @@ def read_trac_attachments():
             'description': description,
             'author': author,
             }
+
+
+def read_trac_status_changes():
+    """
+    Read the Trac status change data from the database.
+    """
+    db = get_db()
+    for row in db.execute(
+            "SELECT * FROM ticket_change where field = 'status';"):
+        ticket, c_time, author, field, oldvalue, newvalue = row
+
+        yield {
+            't_id': ticket,
+            'c_time': c_time,
+            'author': author,
+            'field': field,
+            'oldvalue': oldvalue,
+            'newvalue': newvalue,
+            }
+
+
+def read_trac_owner_changes():
+    """
+    Read the Trac ticket owner changes data from the database.
+    """
+    db = get_db()
+    for row in db.execute(
+            "SELECT * FROM ticket_change where field = 'owner';"):
+        ticket, c_time, author, field, oldvalue, newvalue = row
+
+        yield {
+            't_id': ticket,
+            'c_time': c_time,
+            'author': author,
+            'field': field,
+            'oldvalue': oldvalue,
+            'newvalue': newvalue,
+            }
+
+
+def attach_attachments(tickets, attachments):
+    """
+    Augment each ticket entry with a list of its attachments.
+    """
+    tickets_to_attachments = defaultdict(lambda: [])
+    for a in attachments:
+        tickets_to_attachments[a['t_id']].append(a)
+
+    for t in tickets:
+        t['attachments'] = tickets_to_attachments[str(t['t_id'])]
+
+
+def comment_from_trac_changes(changes, ticket_mapping):
+    """
+    Convert a list of ticket changes occurring at the same time
+    into a GitHub comment.
+    Censor e-mail domains, if they are not in an approved list.
+    """
+    # We only support one comment per change group.
+    assert len([c for c in changes if c['field'] == 'comment']) <= 1, changes
+    # We have at least one change.
+    assert len(changes) >= 1, changes
+    # All changes are at the same time.
+    assert len(set(c['c_time'] for c in changes)) == 1, changes
+    # All changes are on the same ticket.
+    assert len(set(c['t_id'] for c in changes)) == 1, changes
+
+    comment = {
+        'oldvalue': '',
+        'newvalue': '',
+        't_id': changes[0]['t_id'],
+        'c_time': changes[0]['c_time'],
+        'author': changes[0]['author'],
+        }
+    comments = [c for c in changes if c['field'] == 'comment']
+    if comments:
+        comment = comments[0]
+
+    # Description of actions performed.
+    actions_performed = '<br>'.join(
+        dispatch_ticket_change(c) for c in changes if c['field'] != 'comment'
+        )
+    if not actions_performed:
+        author = get_GitHub_user(comment['author'])
+        actions_performed = f'{tag_or_not(author)} commented'
+
+    comment_number = comment.get('oldvalue', '').split('.')[-1]
+    comment_anchor = ''
+    if comment_number:
+        comment_anchor = f'<a name="note_{comment_number}"></a>'
+
+    author = get_GitHub_user(changes[0]['author'])
+    comment_body = ''
+
+    if comment['newvalue']:
+        comment_body = f"\n{parse_body(comment['newvalue'], ticket_mapping)}"
+    body = (
+        f"|{avatar(author)}{comment_anchor}|{actions_performed}|\n"
+        f"|-|-|\n"
+        f"{comment_body}"
+        )
+
+    return {
+        't_id': comment['t_id'],
+        'github_comment': {
+            'created_at': isotime(comment['c_time']),
+            'body': sanitize_email(body),
+            }
+        }
+
+
+def dispatch_ticket_change(trac_data):
+    """
+    Calls the appropriate method to process a ticket change into a description.
+    """
+    if trac_data['field'] == 'status':
+        return status_change_from_trac_data(trac_data)
+    if trac_data['field'] == 'owner':
+        return owner_change_from_trac_data(trac_data)
+    raise ValueError(f'Unhandled field for data: {trac_data}')
+
+
+def status_change_from_trac_data(trac_data):
+    """
+    Convert a ticket status change to a text description.
+    """
+    author = get_GitHub_user(trac_data['author'])
+    return f"{tag_or_not(author)} set status to `{trac_data['newvalue']}`"
+
+
+def owner_change_from_trac_data(trac_data):
+    """
+    Convert a ticket status change to a text description.
+    """
+    author = get_GitHub_user(trac_data['author'])
+    owner = get_GitHub_user(trac_data['newvalue'])
+
+    action = 'removed owner'
+    if owner:
+        action = f'set owner to {tag_or_not(owner)}'
+
+    return f'{tag_or_not(author)} {action}'
+
+
+def get_GitHub_user(trac_user):
+    """
+    Fetch a user from the config mapping, discarding the e-mail.
+    If there is no GitHub user mapped, the `trac_user` argument is returned.
+    """
+    if trac_user is not None:
+        trac_user = trac_user.replace('<automation>', 'Automation').split(' <', 1)[0]
+
+    trac_user = sanitize_email(trac_user)
+
+    github_user, _ = config.USER_MAPPING.get(trac_user, (None, 'N/A'))
+
+    if github_user:
+        return github_user
+
+    return trac_user
+
+
+def tag_or_not(github_user):
+    """
+    Either tag/mention a user with an at-sign (`@user`) if they have a UID,
+    or use their Trac name without linking, if they don't.
+    """
+    if github_user in config.UID_MAPPING:
+        return f"@{github_user}"
+    return github_user
 
 
 def get_db():
@@ -339,10 +556,7 @@ class NumberPredictor:
 
         Return the ticket objects in order, and their expected GitHub numbers.
         """
-        repositories = (
-            [config.REPOSITORY_MAPPING[k] for k in config.REPOSITORY_MAPPING] +
-            [config.FALLBACK_REPOSITORY]
-            )
+        repositories = [config.REPOSITORY]
         all_repo_ordered_tickets = []
         expected_github_numbers = []
 
@@ -351,9 +565,7 @@ class NumberPredictor:
             self.next_numbers[repo] = self.requestNextNumber(
                 repo, already_created)
 
-            tickets_by_id = {
-                t['t_id']: t
-                for t in select_tickets_for_repo(tickets, repo)}
+            tickets_by_id = {t['t_id']: t for t in tickets}
             ordered_tickets = []
             not_matching = deque()
 
@@ -409,22 +621,6 @@ def unique(elements):
     return uniques
 
 
-def select_tickets_for_repo(tickets, repo: str):
-    """
-    From a list of Trac tickets,
-    select the ones that will be posted to a given GitHub repository.
-    """
-    return [t for t in tickets if get_repo(t['component']) == repo]
-
-
-def get_repo(component):
-    """
-    Given the Trac component,
-    choose the GitHub repository to create the issue in.
-    """
-    return config.REPOSITORY_MAPPING.get(component, config.FALLBACK_REPOSITORY)
-
-
 def output_stats(tickets, expected_numbers):
     """
     Show how many tickets will preserve their Trac ID.
@@ -441,7 +637,10 @@ def output_stats(tickets, expected_numbers):
     match_count = sum(1 for t, e in zipped if t.t_id == e)
     print('Expected GitHub numbers to match Trac ID: '
           f'{match_count} out of {len(tickets)}')
-    print('Check tickets_expected.tsv, and if correct, continue the debugger.')
+    print(
+        'Check tickets_expected.tsv, and if correct, continue the debugger. '
+        f'Tickets will be submitted to GitHub: {not DRY_RUN}'
+        )
     import pdb
     pdb.set_trace()
 
@@ -454,11 +653,31 @@ def github_link(repo, expected_number):
     return f'https://github.com/{config.OWNER}/{repo}/issues/{expected_number}'
 
 
+def avatar(user):
+    """
+    Insert an image of the user's avatar, and link to the account.
+    Some UIDs won't scale to 50 (example: albertkoch),
+    so we force it via an HTML img tag.
+    """
+    user_uid = config.UID_MAPPING.get(
+        user,
+        0  # GitHub octocat ghost (does not scale to 50).
+        )
+    if user_uid:
+        return f"[<img alt=\"{user}'s avatar\" src=\"https://avatars.githubusercontent.com/u/{user_uid}?s=50\" width=\"50\" height=\"50\">](https://github.com/{user})"
+    return f"<img alt=\"{user}'s avatar\" src=\"https://avatars.githubusercontent.com/u/0?s=50\" width=\"50\" height=\"50\">"
+
+
 class GitHubRequest:
     """
     Transform Trac tickets, comments, and their metadata to GitHub format,
     and allow submitting that format.
     """
+    # Cache for milestone title -> GitHub ID.
+    milestones = {}
+    # Cache for milestone title -> description.
+    milestoneDescriptions = {}
+
     def __init__(
             self, owner, repo, trac_id,
             title, body, closed, resolution, milestone, labels, assignees,
@@ -469,19 +688,30 @@ class GitHubRequest:
         self.t_id = trac_id
         self.closed = closed
         self.resolution = resolution
-        self.milestone = milestone
+
+        # Data to submit to GitHub.
         self.data = {
             'title': title,
             'body': body,
             'labels': labels,
             'closed': closed,
+            'milestone': milestone
             }
+        if len(body) > 65536:
+            raise ValueError(
+                'GitHub issue length limit is 65536 characters. '
+                f'Trac ticket {self.t_id} has {len(body)}.'
+                )
+
+        if 'labels' in self.data:
+            if any(label != label.lower() for label in self.data['labels']):
+                raise ValueError(
+                    f"All labels must be lowercase: {self.data['labels']}"
+                    )
+
         if assignees:
             self.data['assignee'] = assignees[0]
-
-        # We used updated_at, because some tickets were repurposed,
-        # and it was more meaningful as the GitHub created_at.
-        self.data['created_at'] = updated_at
+        self.data['created_at'] = created_at
         self.data['updated_at'] = updated_at
         if closed:
             # We are assuming closure is the last modification.
@@ -503,37 +733,59 @@ class GitHubRequest:
         https://docs.github.com/en/rest/reference/issues#get-an-issue
         """
         url = f'https://api.github.com/repos/{self.owner}/{self.repo}/import/issues'
+        if (
+                'assignee' in self.data and
+                self.data['assignee'] not in config.ASSIGNABLE_USERS
+            ):
+            # Was deleted during the run.
+            print(f"Skipping assignee {self.data['assignee']}.")
+            self.data['assignee'] = None
+
+        if self.t_id not in all_comments:
+            all_comments[self.t_id] = []
+
         data = {
             'issue': self.data,
-            'comments': []
+            'comments': [c['github_comment'] for c in all_comments[self.t_id]]
             }
 
-        for comment in (c for c in all_comments if c['t_id'] == self.t_id):
-            data['comments'].append(
-                self.commentFromTracData(
-                    comment, ticket_mapping=ticket_mapping
-                    )
-                )
-
         response = protected_request(
-            url=url, data=data, expected_status_code=202)
+            url=url, data=data, expected_status_codes=(202,))
 
         if response:
             # Remember the GitHub URL assigned to each ticket.
-            self.github_import_id = response.json()['id']
+            github_import_id = response.json()['id']
 
             while response.json()['status'] == 'pending':
                 # Wait until our issue is created.
                 print('Waiting for import to finish...')
-                check_url = f'{url}/{self.github_import_id}'
+                check_url = f'{url}/{github_import_id}'
                 response = protected_request(
                     url=check_url,
                     data=None,
                     method=requests.get,
-                    expected_status_code=200
+                    expected_status_codes=(200,)
                     )
 
             if response.json()['status'] != 'imported':
+                if (
+                        'errors' in response.json() and
+                        'field' in response.json()['errors'][0] and
+                        response.json()['errors'][0]['field'] == 'assignee'
+                ):
+                    # Invalid assignee. Try again without.
+                    print(
+                        f'Error: Could not assign {self.data["assignee"]}. '
+                        'Removing from ASSIGNABLE_USERS for this run. '
+                        'Retrying this ticket.')
+                    try:
+                        config.ASSIGNABLE_USERS.remove(self.data['assignee'])
+                    except KeyError:
+                        # Already removed.
+                        pass
+                    self.data['assignee'] = None
+                    return self.submit(expected_number, all_comments, ticket_mapping)
+
                 response = debug_response(response)
 
             number = int(response.json()['issue_url'].rsplit('/', 1)[1])
@@ -555,14 +807,23 @@ class GitHubRequest:
                     f"close the issue if needed, "
                     f"and then restart the script."
                     )
-            response = protected_request(
-                url=response.json()['issue_url'],
-                data=None,
-                method=requests.get,
-                expected_status_code=200
-                )
+
+            # There is a risk of GitHub reporting that the import job is done,
+            # but accessing the issue immediately after returns a 404.
+            created = False
+            issue_api_url = response.json()['issue_url']
+            while not created:
+                response = protected_request(
+                    url=issue_api_url,
+                    data=None,
+                    method=requests.get,
+                    expected_status_codes=(200, 404)
+                    )
+                if response.status_code == 200:
+                    created = True
             self.github_id = response.json()['id']
             print(f"Issue #{self.github_number} has GHID {self.github_id}.")
+        return response
 
     def trac_url(self):
         """
@@ -570,125 +831,101 @@ class GitHubRequest:
         """
         return config.TRAC_TICKET_PREFIX + str(self.t_id)
 
-    def getOrCreateProject(self):
+    @classmethod
+    def getOrCreateMilestone(cls, title, ticket_mapping):
         """
-        If a project for the given milestone exists, return its column IDs,
-        otherwise create it and return its column IDs.
-        Remembers projects in `projects_created.tsv`.
+        If a GitHub milestone exists named like the Trac one, return its ID,
+        otherwise create it and return its ID.
+        Remembers milestones in `milestones_created.tsv`.
 
         API docs:
-        https://docs.github.com/en/rest/reference/projects#create-an-organization-project
-        https://docs.github.com/en/rest/reference/projects#create-a-project-column
+        https://docs.github.com/en/rest/issues/milestones#create-a-milestone
         """
-        name = self.milestone
-        if not name:
+        if not title:
             # Some tickets don't have a milestone.
             return
 
+        if title in cls.milestones:
+            return cls.milestones[title]
+
         # Check whether we have already created the project.
-        with open('projects_created.tsv') as f:
+        with open('milestones_created.tsv') as f:
             projects_data = [line.split('\t') for line in f]
-            for line_name, _, todo_id, done_id, rejected_id in projects_data:
-                if line_name == name:
-                    return todo_id, done_id, rejected_id
+            for line_title, number in projects_data:
+                if line_title == title:
+                    cls.milestones[title] = int(number)
+                    return int(number)
+
+        description = parse_body(
+            cls.getMilestoneDescription(title), ticket_mapping=ticket_mapping
+            )
 
         # We have not created the project. Create it.
         response = protected_request(
-            url=f'https://api.github.com/orgs/{config.PROJECT_ORG}/projects',
-            data={'name': name}
+            url=f'https://api.github.com/repos/{config.OWNER}/{config.REPOSITORY}/milestones',
+            data={
+                'title': title,
+                'description': description,
+                'state': 'closed',
+                }
             )
-        project_id = response.json()['id']
-        columns_url = response.json()['columns_url']
+        try:
+            milestone_number = response.json()['number']
 
-        # Create 3 columns: To Do, Done, and Rejected.
-        todo_resp = protected_request(columns_url, data={'name': 'To Do'})
-        done_resp = protected_request(columns_url, data={'name': 'Done'})
-        rejected_resp = protected_request(columns_url, data={
-            'name': 'Rejected', 'body': 'duplicate, invalid, or wontfix'})
+            with open('milestones_created.tsv', 'a') as f:
+                f.write('\t'.join([title, str(milestone_number)]) + '\n')
+        except AttributeError as e:
+            if "'NoneType' object has no attribute 'json'" in str(e):
+                if DRY_RUN:
+                    # We must be in a debugger.
+                    # Allow continuation, for seeing what will happen further.
+                    milestone_number = -1
+                else:
+                    raise
+            else:
+                raise
 
-        # Close the project.
-        protected_request(
-            url=f'https://api.github.com/projects/{project_id}',
-            data={'state': 'closed'},
-            method=requests.patch,
-            expected_status_code=200,
-            )
+        cls.milestones[title] = milestone_number
+        return milestone_number
 
-        todo_id = todo_resp.json()['id']
-        done_id = done_resp.json()['id']
-        rejected_id = rejected_resp.json()['id']
+    @classmethod
+    def getMilestoneDescription(cls, title):
+        if title in cls.milestoneDescriptions:
+            return cls.milestoneDescriptions[title]
 
-        with open('projects_created.tsv', 'a') as f:
-            f.write('\t'.join([
-                name,
-                str(project_id),
-                str(todo_id),
-                str(done_id),
-                str(rejected_id),
-                ]) + '\n')
+        cls.milestoneDescriptions = read_trac_milestone_descriptions()
+        return cls.milestoneDescriptions[title]
 
-        return todo_id, done_id, rejected_id
-
-    def submitToProject(self):
-        """
-        Add an issue identified by the GitHub global `id`
-        to the proper column of the proper project.
-
-        API docs (very bad ones):
-        https://docs.github.com/en/rest/reference/projects#create-a-project-card
-        """
-        column_ids = self.getOrCreateProject()
-        if not column_ids:
-            return
-
-        todo_id, done_id, rejected_id = column_ids
-
-        # Set the column ID according to issue status and resolution.
-        column_id = todo_id
-        if self.closed:
-            column_id = rejected_id
-            if self.resolution == 'fixed':
-                column_id = done_id
-
-        url = f'https://api.github.com/projects/columns/{column_id}/cards'
-        data = {
-            'content_id': self.github_id,
-            'content_type': 'Issue'
-            }
-        protected_request(url, data)
 
     @classmethod
     def fromTracData(
             cls,
-            component,
-            owner,
-            summary,
-            description,
-            priority,
-            keywords,
             ticket_mapping,
             **kwargs):
         """
         Create a GitHubRequest from Trac ticket data fields.
         """
+        desired_assignees = get_assignees(kwargs['owner'])
+        assignees = [
+            a for a in desired_assignees if a in config.ASSIGNABLE_USERS
+            ]
+
         return cls(
             owner=config.OWNER,
-            repo=get_repo(component),
+            repo=config.REPOSITORY,
             trac_id=kwargs['t_id'],
-            title=summary,
+            title=kwargs['summary'],
             body=get_body(
-                description, data=kwargs, ticket_mapping=ticket_mapping),
+                kwargs['description'],
+                data=kwargs,
+                ticket_mapping=ticket_mapping
+                ),
             closed=kwargs['status'] == 'closed',
             resolution=kwargs['resolution'],
-            milestone=kwargs['milestone'],
-            labels=get_labels(
-                component,
-                priority,
-                keywords,
-                kwargs['status'],
-                kwargs['resolution']
-                ),
-            assignees=get_assignees(owner),
+            milestone=cls.getOrCreateMilestone(
+                kwargs['milestone'], ticket_mapping=ticket_mapping),
+            labels=get_labels(**kwargs),
+            assignees=assignees,
             created_at=isotime(kwargs['time']),
             updated_at=isotime(kwargs['changetime'])
             )
@@ -703,27 +940,9 @@ class GitHubRequest:
                 **{**ticket, 'ticket_mapping': ticket_mapping}
                 )
 
-    @staticmethod
-    def commentFromTracData(trac_data, ticket_mapping):
-        """
-        Convert Trac comment data to GitHub comment body as JSON.
-        """
-        author, _ = config.USER_MAPPING.get(
-            trac_data['author'],
-            (trac_data['author'], 'ignored-email-field')
-            )
-
-        body = (
-            f"Comment by {author} at {showtime(trac_data['c_time'])}.\n"
-            f"\n"
-            f"{parse_body(trac_data['newvalue'], ticket_mapping)}"
-            )
-
-        return {'created_at': isotime(trac_data['c_time']), 'body': body}
-
 
 def protected_request(
-        url, data, method=requests.post, expected_status_code=201):
+        url, data, method=requests.post, expected_status_codes=(201,), debug=True):
     """
     Send a request if DRY_RUN is not truthy.
 
@@ -731,14 +950,20 @@ def protected_request(
     In case of nearing rate limit, sleep until it resets.
     """
 
-    if DRY_RUN:
+    # Breakpoint on exposed emails
+    original = str(data)
+    noemails = sanitize_email(original)
+    if original != noemails:
+        print(original)
+        print(''.join(difflib.context_diff(original, noemails)))
+        import pdb; pdb.set_trace()
+
+    if DRY_RUN and debug:
         print(f"Would call {method} on {url} with data:")
         pprint.pprint(data)
         return
 
     # Import takes more than 0.2 seconds. Avoid checking excessively.
-    # There is a risk of GitHub reporting that the import job is done,
-    # but accessing the issue immediately after returns a 404.
     # Also, there may be a risk of secondary rate limit:
     # https://docs.github.com/en/rest/guides/best-practices-for-integrators#dealing-with-secondary-rate-limits
     time.sleep(0.2)
@@ -750,11 +975,14 @@ def protected_request(
         auth=(config.OAUTH_USER, config.OAUTH_TOKEN)
         )
 
-    if response.status_code != expected_status_code:
+    if (response.status_code not in expected_status_codes) and debug:
         print(f'Error: {method} request failed!')
         debug_response(response)
-
-    wait_for_rate_reset(response)
+    try:
+        wait_for_rate_reset(response)
+    except KeyError:
+        # No rate limit headers?
+        import pdb; pdb.set_trace()
 
     return response
 
@@ -765,9 +993,10 @@ def debug_response(response):
     """
     print(response)
     pprint.pprint(dict(response.headers))
-    pprint.pprint(response.json())
     import pdb
     pdb.set_trace()
+    print('Done debugging!')
+    return response
 
 
 def wait_for_rate_reset(response):
@@ -784,23 +1013,35 @@ def wait_for_rate_reset(response):
         time.sleep(to_sleep)
 
 
+def branch_link(raw_branch):
+    if '://' in raw_branch:
+        # We leave URLs alone.
+        return raw_branch
+
+    # Attempt to parse into GitHub branch link.
+    branchname = raw_branch
+    owner = config.OWNER
+
+    matches = re.search('branches/(.*)', raw_branch)
+    if matches:
+        branchname = matches[1]
+
+    if ':' in branchname:
+        owner, branchname = branchname.split(':')
+
+    return f'https://github.com/{owner}/{config.REPOSITORY}/tree/{branchname}'
+
+
+
 def get_body(description, data, ticket_mapping):
     """
     Generate the ticket description body for GitHub.
     """
-    reporters = get_assignees(data['reporter'])
-    if reporters:
-        reporter = reporters[0]
-    else:
-        reporter = data['reporter']
+    reporter = get_GitHub_user(data['reporter'])
 
-    changed_message = ''
-    if data['changetime'] != data['time']:
-        changed_message = f"Last changed on {showtime(data['changetime'])}.\n"
-
-    pr_message = ''
+    branch_message = ''
     if data['branch']:
-        pr_message = f"PR at {data['branch']}.\n"
+        branch_message = f"|Branch|{branch_link(data['branch'])}|\n"
 
     attachments_message = ''
     if 'attachments' in data and data['attachments']:
@@ -810,32 +1051,44 @@ def get_body(description, data, ticket_mapping):
         attachments_message = f"\n\n" \
                               f"Attachments:\n" \
                               f"\n" \
-                              f"{attachment_links_message}\n"
+                              f"{attachment_links_message}"
 
     body = (
-        f"trac-{data['t_id']} {data['t_type']} was created by @{reporter}"
-        f" on {showtime(data['time'])}.\n"
-        f"{changed_message}"
-        f"{pr_message}"
+        f"|{avatar(reporter)}| {tag_or_not(reporter)} reported|\n"
+        f"|-|-|\n"
+        f"|Trac ID|trac#{data['t_id']}|\n"
+        f"|Type|{data['t_type']}|\n"
+        f"|Created|{showtime(data['time'])}|\n"
+        f"{branch_message}"
         "\n"
-        f"{parse_body(description, ticket_mapping)}"
+        f"{sanitize_email(parse_body(description, ticket_mapping))}"
         f"{attachments_message}"
+        f"{format_metadata(data)}"
         )
 
     return body
 
 
-def get_labels(component, priority, keywords, status, resolution):
+def get_labels(
+        component=None,
+        priority=None,
+        keywords=None,
+        status=None,
+        resolution=None,
+        t_type=None,
+        **kwargs):
     """
     Given the Trac component, priority, keywords, and resolution,
     return the labels to apply on the GitHub issue.
     """
     priority_label = labels_from_priority(priority)
+    type_labels = labels_from_type(t_type)
     keyword_labels = labels_from_keywords(keywords)
     component_labels = labels_from_component(component)
     status_labels = labels_from_status_and_resolution(status, resolution)
     labels = (
         {priority_label}.union(
+            type_labels).union(
             keyword_labels).union(
             component_labels).union(
             status_labels)
@@ -843,17 +1096,24 @@ def get_labels(component, priority, keywords, status, resolution):
     return sorted(labels)
 
 
+def labels_from_type(ticket_type):
+    if not ticket_type:
+        return {}
+
+    if ticket_type.startswith('release blocker'):
+        return {'release-blocker'}
+
+    return {ticket_type.lower()}
+
+
 def get_assignees(owner):
     """
-    Map the owner to the GitHub account.
+    Map the owner to the GitHub account as assignee.
     """
-    try:
-        owner, _ = config.USER_MAPPING.get(owner)
+    owner = get_GitHub_user(owner)
+    if owner in config.ASSIGNABLE_USERS:
         return [owner]
-    except TypeError as error:
-        if 'cannot unpack non-iterable NoneType object' in str(error):
-            return []
-        raise
+    return []
 
 
 def showtime(unix_usec):
@@ -884,10 +1144,10 @@ def labels_from_component(component: str):
     Given the Trac component,
     choose the labels to apply on the GitHub issue, if any.
     """
-    if component in config.REPOSITORY_MAPPING:
+    if not component:
         return []
 
-    return [component]
+    return [component.lower()]
 
 
 def labels_from_keywords(keywords: Union[str, None]):
@@ -895,61 +1155,21 @@ def labels_from_keywords(keywords: Union[str, None]):
     Given the Trac `keywords` string, clean it up and parse it into a list.
     """
     if keywords is None:
-        return set()
+        return []
 
-    keywords = keywords.replace(',', '')
+    keywords = keywords.replace(',', ' ')
     keywords = keywords.split(' ')
-
-    allowed_keyword_labels = {
-        'design',
-        'easy',
-        'feature',
-        'happy-hacking',
-        'onboarding',
-        'password-management',
-        'perf-test',
-        'remote-management',
-        'salt',
-        'scp',
-        'security',
-        'tech-debt',
-        'twisted',
-        'ux',
-        'Adwords', 'Bing', 'PPC',
-        'brink',
-        'cdp',
-        'cisco',
-        'docker',
-        'Documentation',
-        'email',
-        'events',
-        'lets-encrypt',
-        'macos', 'bind',
-        'remote-manager',
-        'syslog',
-        'backup',
-        'vpn',
-        'file-server',
-        'website',
-        'windows', 'testing',
-        }
-    typo_fixes = {'tech-dept': 'tech-debt', 'tech-deb': 'tech-debt'}
-
-    keywords = [typo_fixes.get(kw, kw) for kw in keywords if kw]
-    discarded = [kw for kw in keywords if kw not in allowed_keyword_labels]
-
-    if discarded:
-        print("Warning: discarded keywords:", discarded)
-
-    return {kw for kw in keywords if kw in allowed_keyword_labels}
+    keywords = [kw.lower() for kw in keywords if kw]
+    return [kw for kw in keywords if kw in config.ALLOWED_KEYWORDS]
 
 
 def labels_from_priority(priority):
     """
-    Interpret None (missing) priority as Low.
+    Interpret None (missing) priority as normal
+    (because it is the most frequent in DB counts).
     """
     if priority is None:
-        return 'priority-low'
+        return 'priority-normal'
     return 'priority-{}'.format(priority.lower())
 
 
@@ -962,12 +1182,13 @@ def labels_from_status_and_resolution(status, resolution):
     if the status is not "assigned", "new", or "closed".
     """
     if status == 'closed' and resolution:
-        return {resolution}
+        return {resolution.lower()}
 
-    if status in ['in_work', 'needs_changes', 'needs_merge', 'needs_review']:
-        return {status.replace('_', '-')}
+    if status:
+        return {status.lower()}
 
-    return set()
+    # There is no status nor resolution.
+    return {}
 
 
 def format_attachments(ticket_id, attachment_list):
@@ -979,10 +1200,90 @@ def format_attachments(ticket_id, attachment_list):
         f"[{attachment['filename']}]"
         f"({get_attachment_path(config.ATTACHMENT_ROOT, ticket_id, attachment['filename'])})"
         f" ({attachment['size']} bytes) - "
-        f"added by {attachment['author']} "
+        f"added by {sanitize_email(attachment['author'])} "
         f"on {showtime(int(attachment['time']))} - "
         f"{attachment['description']}"
         for attachment in sorted(attachment_list, key=lambda a: a['time'])
+        )
+
+
+def sanitize_email(text):
+    """
+    Sanitize emails like Trac, by replacing the domain with 3 dots.
+    """
+    if text is not None:
+        for match in re.findall(MAIL_REGEX, text, flags=re.MULTILINE):
+            text_match = f'{match[0]}@{match[1]}'
+            if match[0] in ['n', 'n-']:
+                # This is most likely an unescaped newline (\n)
+                # followed by a Python decorator (say @defer.inlineCallbacks).
+                continue
+            if match[1] == '...':
+                # Already sanitized this occurrence.
+                continue
+            if text_match in config.ALLOWED_EMAILS:
+                continue
+            if text_match in ['n' + m for m in config.ALLOWED_EMAILS]:
+                # An unescaped newline (\n) in addition to an allowed email.
+                continue
+            text = text.replace(text_match, f'{match[0]}@...')
+    return text
+
+
+def format_metadata(ticket_data):
+    """
+    Output a machine-readable section out of the ticket data.
+    """
+    fields = (
+        't_id '
+        't_type '
+        'reporter '
+        'priority '
+        'milestone '
+        'branch '
+        'branch_author '
+        'status '
+        'resolution '
+        'component '
+        'keywords '
+        'time '
+        'changetime '
+        'version '
+        'owner'
+        )
+
+    def rename(field):
+        mappings = {'t_id': 'trac-id', 't_type': 'type'}
+        return mappings.get(field, field)
+
+    def process(value):
+        """
+        Replace everything with underscores, for GitHub searchability.
+        Then append the original value, to preserve meaning.
+        """
+        value = sanitize_email(str(value))
+        original = value
+        value = re.sub('[^a-zA-Z0-9]', '_', original)
+        return f'{value} {original}'
+
+    renamed_data = {
+        rename(k): process(ticket_data[k])
+        for k in fields.split()
+        }
+
+    formatted = '\n'.join(f'{k}__{v}' for k, v in renamed_data.items())
+    cc_input = ticket_data['cc'].split(', ') if ticket_data['cc'] else ''
+    cc_output = ' '.join(f'cc__{sanitize_email(user)}' for user in cc_input)
+    return (
+        '\n'
+        '\n'
+        '<details><summary>Searchable metadata</summary>\n'
+        '\n'
+        '```\n'
+        f'{formatted}\n'
+        f'{cc_output}\n'
+        '```\n'
+        '</details>\n'
         )
 
 
@@ -1030,6 +1331,7 @@ def convert_issue_content(text, ticket_mapping):
     """
     text = text.replace(config.TRAC_TICKET_PREFIX, '#')
     ticket_re = '#([0-9]+)'
+    text = update_changeset(text)
     for match in matches(ticket_re, text):
         try:
             github_url = ticket_mapping[int(match)]
@@ -1040,11 +1342,24 @@ def convert_issue_content(text, ticket_mapping):
                 text
                 )
         except KeyError:
-            # We don't know this ticket. Leave it alone.
-            print("Warning: unknown ticket: #" + str(match))
-            pass
+            # We don't know this ticket. Warn about it.
+            print(
+                f"Warning: ticket #{match} not in tickets_expected_gold.tsv"
+                f" - leaving it as #{match}")
 
-    return convert(text, base_path='')
+    return convert(text, base_path='', wiki_prefix=config.MIGRATED_WIKI_PREFIX)
+
+
+def update_changeset(text):
+    """
+    Converts Trac changeset format to unquoted commit hash,
+    which is linked by GitHub automatically.
+    """
+    return re.sub(
+        'In \[changeset:"([a-f0-9]+)" [a-f0-9]+\]:',
+        'In changeset \\1',
+        text
+        )
 
 
 def parse_curly(description, ticket_mapping):
@@ -1067,6 +1382,14 @@ def parse_curly(description, ticket_mapping):
     if content.strip().startswith('#!rst'):
         return (
             content.split('#!rst', 1)[1] +
+            parse_body(description[ending:], ticket_mapping)
+            )
+
+    if content.strip().startswith('#!python'):
+        return (
+            '```python' +
+            content.split('#!python', 1)[1] +
+            '```' +
             parse_body(description[ending:], ticket_mapping)
             )
 

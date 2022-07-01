@@ -7,24 +7,6 @@ import ticket_migrate_golden_comet_preview as tm
 tm.config = config_test
 
 
-class TestRepositoryMapping(unittest.TestCase):
-    """
-    Trac components map to the configured GitHub repositories.
-
-    These tests depend on `config.py` having the contents
-    from `config.py.sample`.
-    """
-
-    def test_get_repo(self):
-        """
-        Check that the issue is opened in the correct GitHub repository
-        based on the Trac component.
-        """
-        self.assertEqual(tm.get_repo('client'), 'client')
-        self.assertEqual(tm.get_repo('commons'), 'commons')
-        self.assertEqual(tm.get_repo('fallback'), 'server')
-
-
 class TestLabelMapping(unittest.TestCase):
     """
     Trac labels are parsed based on component, priority, and keywords_string.
@@ -37,80 +19,130 @@ class TestLabelMapping(unittest.TestCase):
         """
         Parse and clean the Trac keywords.
         """
-        # Split by space.
+        # Split by space or comma.
         self.assertEqual(
-            {'easy', 'tech-debt'},
-            tm.labels_from_keywords('easy tech-debt'))
+            ['windows', 'tests'],
+            tm.labels_from_keywords('windows tests'))
+        self.assertEqual(
+            ['windows', 'tests'],
+            tm.labels_from_keywords('windows,tests'))
 
         # Remove commas.
-        self.assertEqual({'tech-debt'}, tm.labels_from_keywords('tech-debt,'))
+        self.assertEqual(['tests'], tm.labels_from_keywords('tests,'))
         self.assertEqual(
-            {'tech-debt', 'feature'},
-            tm.labels_from_keywords('tech-debt, feature'))
+            ['windows', 'tests'],
+            tm.labels_from_keywords('windows, tests'))
 
-        # Fix typos.
+        # Lowercase labels.
         self.assertEqual(
-            {'tech-debt', 'easy'},
-            tm.labels_from_keywords('tech-dept easy'))
-        self.assertEqual(
-            {'tech-debt'},
-            tm.labels_from_keywords('tech-deb'))
+            ['windows', 'tests'],
+            tm.labels_from_keywords('Windows, Tests'))
 
-        # Discard unknown words to prevent tag explosion.
+        # Only keep allowed keywords.
         self.assertEqual(
-            set(),
-            tm.labels_from_keywords('unknown-tag'))
-
-        # Deduplicate.
-        self.assertEqual(
-            {'tech-debt'},
-            tm.labels_from_keywords('tech-deb, tech-debt tech-dept'))
+            ['tests'],
+            tm.labels_from_keywords('tech-debt, Tests'))
 
         # Handles None correctly.
         self.assertEqual(
-            set(),
+            [],
             tm.labels_from_keywords(None))
+
+        # Handles empty tags correctly.
+        self.assertEqual(
+            [],
+            tm.labels_from_keywords(''))
+        self.assertEqual(
+            [],
+            tm.labels_from_keywords(', , ,,  '))
+        self.assertEqual(
+            ['priority-normal', 'tests'],
+            tm.get_labels(keywords='tests, ,tests ,,Tests  '))
 
     def test_get_labels_none(self):
         """
-        The issues that do not map to the fallback repository
-        get no label based on the component.
+        When priority field is missing, it is automatically assigned "normal".
         """
         self.assertEqual(
-            ['priority-low', 'tech-debt'],
+            ['client', 'priority-low', 'tests'],
             tm.get_labels(
                 component='client',
                 priority='Low',
-                keywords='tech-dept',
+                keywords='tests',
                 status='',
                 resolution='',
                 ))
 
         self.assertEqual(
-            ['priority-high'],
+            ['priority-high', 'server'],
             tm.get_labels(
-                component='client',
+                component='server',
                 priority='High',
                 keywords='',
                 status='',
                 resolution='',
                 ))
 
-        # Handles "None" correctly.
-        self.assertEqual(
-            ['priority-low'],
-            tm.get_labels(
-                component='client',
-                priority=None,
-                keywords='',
-                status=None,
-                resolution=None,
-                ))
+        # Handles missing args (None) correctly.
+        self.assertEqual(['priority-normal'], tm.get_labels())
 
     def test_get_labels_component_name(self):
+        """
+        The component gets converted to a label.
+        """
         self.assertEqual(
-            ['fallback', 'priority-low'],
-            tm.get_labels('fallback', 'Low', '', '', ''))
+            ['priority-low', 'release management'],
+            tm.get_labels(
+                component='release management',
+                priority='Low'
+                )
+            )
+
+    def test_labels_from_status_and_resolution(self):
+        """
+        Status can be empty/None or:
+            new, assigned, closed, reopened.
+        If status is closed, resolution can be empty/None or:
+            duplicate, fixed, invalid,
+        """
+        self.assertEqual(
+            {'assigned'},
+            tm.labels_from_status_and_resolution('assigned', '')
+            )
+        self.assertEqual(
+            {'assigned'},
+            tm.labels_from_status_and_resolution('assigned', None)
+            )
+        self.assertEqual(
+            {'closed'},
+            tm.labels_from_status_and_resolution('closed', None)
+            )
+        self.assertEqual(
+            {'worksforme'},
+            tm.labels_from_status_and_resolution('closed', 'worksforme')
+            )
+        self.assertEqual(
+            {'new'},
+            tm.labels_from_status_and_resolution('new', '')
+            )
+        self.assertEqual(
+            {},
+            tm.labels_from_status_and_resolution(None, None)
+            )
+
+    def test_labels_from_type(self):
+        self.assertEqual(
+            ['defect', 'priority-normal'],
+            tm.get_labels(t_type='Defect')
+            )
+        self.assertEqual(
+            ['defect', 'priority-normal'],
+            tm.get_labels(t_type='defect', keywords='defect')
+            )
+        self.assertEqual(
+            ['priority-normal', 'release-blocker'],
+            tm.get_labels(t_type='release blocker: regression')
+            )
 
 
 class TestAssigneeMapping(unittest.TestCase):
@@ -123,6 +155,23 @@ class TestAssigneeMapping(unittest.TestCase):
     def test_unknown_user_mapping(self):
         self.assertEqual([], tm.get_assignees('john-doe'))
 
+    def test_email_stripping(self):
+        """
+        Don't publish the e-mails of users.
+        """
+        self.assertEqual(
+            'SomeUser', tm.get_GitHub_user('SomeUser <some@email.com>')
+            )
+
+    def test_user_mapping_after_stripping(self):
+        """
+        Users are looked up after stripping the e-mail.
+        """
+        self.assertEqual(
+            'adiroiban',
+            tm.get_GitHub_user('Adi Roiban <adi.roiban@chevah.com>')
+            )
+
 
 class TestBody(unittest.TestCase):
     """
@@ -130,37 +179,23 @@ class TestBody(unittest.TestCase):
     """
     def test_get_body_details(self):
         """
-        Writes Trac ticket details at the beginning of the description.
-        """
-        self.assertEqual(
-            "trac-12345 bug was created by @adiroiban on "
-            "1970-01-01 00:00:00Z.\n"
-            "\n"
-            "The ticket description.",
+        Writes Trac ticket details at the beginning of the description,
+        then the description and attachments if any,
+        then machine-readable details at the end.
 
-            tm.get_body(
-                "The ticket description.",
-                {
-                    't_id': 12345,
-                    't_type': 'bug',
-                    'reporter': 'adi',
-                    'time': 1234,
-                    'changetime': 1234,
-                    'branch': None,
-                    },
-                ticket_mapping={},
-                )
-            )
+        This is a "golden test" which covers all features.
+        """
+        self.maxDiff = 10000
 
-    def test_get_body_attachments(self):
-        """
-        When the ticket data includes attachments,
-        """
         self.assertEqual(
-            "trac-4419 bug was created by @adiroiban on "
-            "1970-01-01 00:00:00Z.\n"
+            "|[<img alt=\"adiroiban's avatar\" src=\"https://avatars.githubusercontent.com/u/204609?s=50\" width=\"50\" height=\"50\">](https://github.com/adiroiban)| @adiroiban reported|\n"
+            "|-|-|\n"
+            "|Trac ID|trac#4419|\n"
+            "|Type|release blocker: release process bug|\n"
+            "|Created|1970-01-01 00:00:00Z|\n"
+            "|Branch|https://github.com/chevah/trac-migration-staging/tree/4419-some-branch-somewhere|\n"
             "\n"
-            "The ticket description.\n"
+            "The ticket description. Some ```monospaced``` text.\n"
             "\n"
             "Attachments:\n"
             "\n"
@@ -174,25 +209,57 @@ class TestBody(unittest.TestCase):
             "* [0001-Make-IRCClient.noticed-empty-by-default-to-avoid-loo.patch]"
             "(https://site.com/trunk/ticket/35c/35ccaee7c6ad5b60087406a818a6e0602a2a771f/e3090ff2b269e2f0b4c2e1dfacdb7ecadb36a47b.patch) "
             "(12345 bytes) - "
-            "added by author_nickname2 on 2011-10-22 06:47:14Z - "
-            "Simpler patch that just blanks the noticed() implementation\n",
+            "added by author_nickname2@... on 2011-10-22 06:47:14Z - "
+            "Simpler patch that just blanks the noticed() implementation\n"
+            "\n"
+            "<details><summary>Searchable metadata</summary>\n"
+            "\n"
+            "```\n"
+            "trac-id__4419 4419\n"
+            "type__release_blocker__release_process_bug release blocker: release process bug\n"
+            "reporter__adi adi\n"
+            "priority__some_priority some-priority\n"
+            "milestone__some_milestone some-milestone\n"
+            "branch__4419_some_branch_somewhere 4419-some-branch-somewhere\n"
+            "branch_author__someone_like_you someone_like_you\n"
+            "status__some_status some-status\n"
+            "resolution__some_resolution some-resolution\n"
+            "component__some_component some-component\n"
+            "keywords__some_keywords some-keywords\n"
+            "time__1234 1234\n"
+            "changetime__1236000000 1236000000\n"
+            "version__some_version some-version\n"
+            "owner__some_owner some-owner\n"
+            "cc__some-cc cc__other_CC cc__mail_domain_stripped@...\n"
+            "```\n"
+            "</details>\n",
 
             tm.get_body(
-                "The ticket description.",
-                data={
+                "The ticket description. Some {{{monospaced}}} text.",
+                {
                     't_id': 4419,
-                    't_type': 'bug',
+                    't_type': 'release blocker: release process bug',
                     'reporter': 'adi',
                     'time': 1234,
-                    'changetime': 1234,
-                    'branch': None,
+                    'changetime': 1236000000,
+                    'branch': '4419-some-branch-somewhere',
+                    'branch_author': 'someone_like_you',
+                    'priority': 'some-priority',
+                    'milestone': 'some-milestone',
+                    'status': 'some-status',
+                    'resolution': 'some-resolution',
+                    'component': 'some-component',
+                    'keywords': 'some-keywords',
+                    'cc': 'some-cc, other_CC, mail_domain_stripped@cc.com',
+                    'owner': 'some-owner',
+                    'version': 'some-version',
                     'attachments': (
                         {
                             'filename': '0001-Make-IRCClient.noticed-empty-by-default-to-avoid-loo.patch',
                             'size': '12345',
                             'time': '1319266034000000',
                             'description': 'Simpler patch that just blanks the noticed() implementation',
-                            'author': 'author_nickname2',
+                            'author': 'author_nickname2@google.com',
                             },
                         {
                             'filename': 'issue4419.diff',
@@ -207,28 +274,35 @@ class TestBody(unittest.TestCase):
                 )
             )
 
-    def test_get_body_monospace(self):
+    def test_branch_link(self):
         """
-        Parses monospace squiggly brackets.
+        Branch links are converted from various formats to simple links.
+        Links are automatically formatted by GitHub.
         """
+        # A branch name.
         self.assertEqual(
-            "trac-5432 task was created by @someone_else on "
-            "1970-01-01 00:00:00Z.\n"
-            "\n"
-            "The ticket ```description```.",
-
-            tm.get_body(
-                "The ticket {{{description}}}.",
-                {
-                    't_id': 5432,
-                    't_type': 'task',
-                    'reporter': 'someone_else',
-                    'time': 1234,
-                    'changetime': 1234,
-                    'branch': ''
-                    },
-                ticket_mapping={},
-                )
+            'https://github.com/chevah/trac-migration-staging/tree/10286-pwd-checkers-types',
+            tm.branch_link('10286-pwd-checkers-types')
+            )
+        # A branch name prefixed with `/branches/`.
+        self.assertEqual(
+            'https://github.com/chevah/trac-migration-staging/tree/10286-pwd-checkers-types',
+            tm.branch_link('/branches/10286-pwd-checkers-types')
+            )
+        # A branch name prefixed with `branches/`.
+        self.assertEqual(
+            'https://github.com/chevah/trac-migration-staging/tree/10286-pwd-checkers-types',
+            tm.branch_link('branches/10286-pwd-checkers-types')
+            )
+        # A branch name that includes a different username.
+        self.assertEqual(
+            'https://github.com/dstufft/trac-migration-staging/tree/8900-dstufft-undefer',
+            tm.branch_link('dstufft:8900-dstufft-undefer')
+            )
+        # A branch URL.
+        self.assertEqual(
+            'https://github.com/twisted/twisted-trac-migration/tree/10286-pwd-checkers-types',
+            tm.branch_link('https://github.com/twisted/twisted-trac-migration/tree/10286-pwd-checkers-types')
             )
 
 
@@ -241,6 +315,41 @@ class TestParseBody(unittest.TestCase):
             'text `monospace` text',
             tm.parse_body('text `monospace` text', ticket_mapping={})
             )
+
+    def test_pycode(self):
+        """
+        Python code is preserved.
+        """
+        self.assertEqual(
+            'text\n'
+            '```python\n'
+            'print("hello world!")\n'
+            '```\n'
+            'text',
+
+            tm.parse_body(
+                'text\n'
+                '{{{#!python\n'
+                'print("hello world!")\n'
+                '}}}\n'
+                'text',
+
+                ticket_mapping={}
+                )
+            )
+
+    def test_changeset(self):
+        """
+        Converts Trac changeset format to unquoted commit hash,
+        which is linked by GitHub automatically.
+        """
+        self.assertEqual(
+            'In changeset 11cac74c6a2b528f1caabaa63d532be0ae262c90\n',
+            tm.parse_body(
+                'In [changeset:"11cac74c6a2b528f1caabaa63d532be0ae262c90" 11cac74]:\n',
+                ticket_mapping={},
+            )
+        )
 
     def test_curly(self):
         self.assertEqual(
@@ -354,6 +463,73 @@ class TestParseBody(unittest.TestCase):
                 )
             )
 
+    def test_wiki_link(self):
+        """
+        Wiki links are replaced with links to the configured URL.
+        """
+        self.assertEqual(
+            "[EDNS is an extended DNS](https://example.org/wiki/EDNS0)",
+            tm.parse_body(
+                "[wiki:EDNS0 EDNS is an extended DNS]",
+                ticket_mapping={},
+                )
+            )
+        self.assertEqual(
+            "[EDNS0](https://example.org/wiki/EDNS0) is an extended DNS",
+            tm.parse_body(
+                "[wiki:EDNS0] is an extended DNS",
+                ticket_mapping={},
+                )
+            )
+        self.assertEqual(
+            "[EDNS0](https://example.org/wiki/EDNS0) is an extended DNS",
+            tm.parse_body(
+                "wiki:EDNS0 is an extended DNS",
+                ticket_mapping={},
+                )
+            )
+        self.assertEqual(
+            "[Pending planning](https://example.org/wiki/Plan/TwistedWebHTTP20)",
+            tm.parse_body(
+                "[wiki:Plan/TwistedWebHTTP20 Pending planning]",
+                ticket_mapping={},
+                )
+            )
+        self.assertEqual(
+            "See:\n"
+            "* [EDNS0#NewDNSSECRecordsandLookupMethods]"
+            "(https://example.org/wiki/EDNS0#NewDNSSECRecordsandLookupMethods)",
+            tm.parse_body(
+                "See:\n"
+                "* wiki:EDNS0#NewDNSSECRecordsandLookupMethods",
+                ticket_mapping={},
+                )
+            )
+        self.assertEqual(
+            "[TwistedNames](https://example.org/wiki/TwistedNames), "
+            "followed by a comma",
+            tm.parse_body(
+                "wiki:TwistedNames, followed by a comma",
+                ticket_mapping={},
+                )
+            )
+
+    def test_anchor_links_removed(self):
+        """
+        Remove anchor links, since they will not be preserved in GitHub.
+        """
+        self.assertEqual(
+            "In order to "
+            "[avoid third-party cookies](https://github.com/chevah/sftpplus.com/pull/254), "
+            "we need to handle the contact form ourselves.",
+            tm.parse_body(
+                "In order to "
+                "[https://github.com/chevah/sftpplus.com/pull/254 avoid third-party cookies], "
+                "we need to handle the contact form ourselves.",
+                ticket_mapping={},
+                )
+            )
+
     def test_ticket_replacement(self):
         """
         Converts Trac ticket IDs to GitHub numbers.
@@ -415,7 +591,7 @@ class TestParseBody(unittest.TestCase):
 
     def test_missing_ticket_replacement(self):
         """
-        Leaves missing Trac ticket IDs alone.
+        Missing Trac ticket IDs are left alone as #1234.
         """
         self.assertEqual(
             "Some issue is solved in #345.",
@@ -456,74 +632,181 @@ class TestCommentGeneration(unittest.TestCase):
         """
         Check that the body of a comment includes its author and latest text.
         """
-        trac_data = {
-            'ticket': 3928,
+        trac_data = [{
+            't_id': 3928,
             'c_time': 1489439926524055,
-            'author': 'adi',
-            'newvalue': 'Thanks.',
-            }
+            'author': 'someone@google.com',
+            'field': 'comment',
+            'oldvalue': '12.13',
+            'newvalue': 'Thanks. some-email@google.com',
+            }]
         desired_body = (
-            "Comment by adiroiban at 2017-03-13 21:18:46Z.\n"
+            '|<img alt="someone@...\'s avatar" src="https://avatars.githubusercontent.com/u/0?s=50" width="50" height="50"><a name="note_13"></a>|someone@... commented|\n'
+            "|-|-|\n"
             "\n"
-            "Thanks."
+            "Thanks. some-email@..."
             )
 
         self.assertEqual(
             desired_body,
-            tm.GitHubRequest.commentFromTracData(
+            tm.comment_from_trac_changes(
                 trac_data,
                 ticket_mapping={}
-                )['body']
+                )['github_comment']['body']
             )
 
     def test_no_user(self):
         """
         A user not defined in config.py is preserved.
         """
-        trac_data = {
-            'ticket': 3928,
+        trac_data = [{
+            't_id': 3928,
             'c_time': 1488909819877801,
             'author': 'andradaE',
+            'field': 'comment',
             'newvalue': 'Thanks.',
-            }
+            }]
         desired_body = (
-            "Comment by andradaE at 2017-03-07 18:03:39Z.\n"
+            '|<img alt="andradaE\'s avatar" src="https://avatars.githubusercontent.com/u/0?s=50" width="50" height="50">|andradaE commented|\n'
+            "|-|-|\n"
             "\n"
             "Thanks."
             )
 
         self.assertEqual(
             desired_body,
-            tm.GitHubRequest.commentFromTracData(
+            tm.comment_from_trac_changes(
                 trac_data,
                 ticket_mapping={}
-                )['body']
+                )['github_comment']['body']
             )
 
     def test_formatting(self):
         """
         Check that at least some formatting works.
         """
-        trac_data = {
-            'ticket': 3928,
+        trac_data = [{
+            't_id': 3928,
             'c_time': 1488909819877801,
             'author': 'andradaE',
+            'field': 'comment',
             'newvalue': (
                 '[http://styleguide.chevah.com/tickets.html Style Guide]'
-                )
-            }
+                ),
+            }]
         desired_body = (
-            "Comment by andradaE at 2017-03-07 18:03:39Z.\n"
+            '|<img alt="andradaE\'s avatar" src="https://avatars.githubusercontent.com/u/0?s=50" width="50" height="50">|andradaE commented|\n'
+            "|-|-|\n"
             "\n"
             "[Style Guide](http://styleguide.chevah.com/tickets.html)"
             )
 
         self.assertEqual(
             desired_body,
-            tm.GitHubRequest.commentFromTracData(
+            tm.comment_from_trac_changes(
                 trac_data,
                 ticket_mapping={},
-                )['body']
+                )['github_comment']['body']
+            )
+
+    def test_status_change(self):
+        """
+        A GitHub comment is created from a status change.
+        """
+        trac_data = [{
+            't_id': 3928,
+            'c_time': 1489439926524055,
+            'author': 'mthuurne',
+            'field': 'status',
+            'newvalue': 'reopened',
+            }]
+        desired_body = (
+            '|[<img alt="mthuurne\'s avatar" src="https://avatars.githubusercontent.com/u/246676?s=50" width="50" height="50">](https://github.com/mthuurne)|@mthuurne set status to `reopened`|\n'
+            "|-|-|\n"
+            )
+
+        self.assertEqual(
+            desired_body,
+            tm.comment_from_trac_changes(
+                trac_data, ticket_mapping={}
+                )['github_comment']['body']
+            )
+
+    def test_assignment(self):
+        """
+        A GitHub comment is created from an assignment to a different owner.
+        """
+        trac_data = {
+            't_id': 3928,
+            'c_time': 1489439926524055,
+            'author': 'andradaE',
+            'newvalue': 'mthuurne',
+            }
+        desired_body = (
+            "andradaE set owner to @mthuurne"
+            )
+
+        self.assertEqual(
+            desired_body,
+            tm.owner_change_from_trac_data(trac_data)
+            )
+
+    def test_complex(self):
+        """
+        A GitHub comment is created from a removal of the owner,
+        a status change and a comment.
+        """
+        trac_data = [
+            {
+                't_id': 3928,
+                'c_time': 1489439926524055,
+                'author': 'andradaE@google.com',
+                'field': 'owner',
+                'newvalue': '',
+                },
+            {
+                't_id': 3928,
+                'c_time': 1489439926524055,
+                'author': 'andradaE@google.com',
+                'field': 'status',
+                'newvalue': 'closed',
+                },
+            {
+                't_id': 3928,
+                'c_time': 1489439926524055,
+                'author': 'andradaE@google.com',
+                'field': 'comment',
+                'newvalue': 'Finally, this is done!',
+                },
+            ]
+
+        desired_body = (
+            "|<img alt=\"andradaE@...'s avatar\" src=\"https://avatars.githubusercontent.com/u/0?s=50\" width=\"50\" height=\"50\">|"
+            "andradaE@... removed owner<br>"
+            "andradaE@... set status to `closed`|\n"
+            "|-|-|\n"
+            "\n"
+            "Finally, this is done!"
+            )
+
+        self.assertEqual(
+            desired_body,
+            tm.comment_from_trac_changes(
+                trac_data, ticket_mapping={}
+                )['github_comment']['body']
+            )
+
+    def test_sanitize_allowed_email(self):
+        """
+        An allowed e-mail is not sanitized.
+        """
+        self.assertEqual(
+            'forbidden@..., allowed@example.com',
+            tm.sanitize_email('forbidden@example.com, allowed@example.com')
+            )
+        self.assertEqual(
+            'allowed@example.com, forbidden@...',
+            tm.sanitize_email('allowed@example.com, forbidden@example.com')
             )
 
 
@@ -540,20 +823,23 @@ class TestGitHubRequest(unittest.TestCase):
         request_gen = tm.GitHubRequest.fromTracDataMultiple(
             trac_data=[{
                 'component': 'trac-migration-staging',
-                'owner': 'danuker',
+                'owner': 'adi',
                 'status': 'closed',
                 'resolution': 'wontfix',
-                'milestone': 'some-milestone',
+                'milestone': '',    # Tested manually due to side-effects.
                 'summary': 'summary',
                 'description': 'description',
                 'priority': 'high',
-                'keywords': 'feature, easy',
-                'reporter': 'adi',
+                'keywords': 'windows, tests',
+                'reporter': 'danuker@forbidden.net',
                 't_id': 6,
                 't_type': 'task',
                 'time': 1288883091000000,
                 'changetime': 1360238496689890,
-                'branch': 'https://github.com/chevah/agent-1.5/pull/10'
+                'branch': '10286-pwd-checkers-types',
+                'branch_author': 'somebody_i_used_to_know',
+                'cc': 'the_nsa@forbidden.net',
+                'version': '2.0',
                 }],
             ticket_mapping={},
             )
@@ -564,20 +850,37 @@ class TestGitHubRequest(unittest.TestCase):
 
         self.assertEqual('trac-migration-staging', request.repo)
         self.assertEqual('chevah', request.owner)
-        self.assertEqual('danuker', request.data['assignee'])
+        self.assertEqual('adiroiban', request.data['assignee'])
         self.assertEqual(
-            ['easy', 'feature', 'priority-high', 'wontfix'],
+            [
+                'priority-high',
+                'task',
+                'tests',
+                'trac-migration-staging',
+                'windows',
+                'wontfix',
+                ],
             request.data['labels'])
-        self.assertEqual('danuker', request.data['assignee'])
-        self.assertEqual('some-milestone', request.milestone)
         self.assertEqual('summary', request.data['title'])
+
+        # Test just one metadata field (before `type__`).
+        # The rest are tested in TestBody.
         self.assertEqual(
-            'trac-6 task was created by @adiroiban on 2010-11-04 15:04:51Z.\n'
-            'Last changed on 2013-02-07 12:01:36Z.\n'
-            'PR at https://github.com/chevah/agent-1.5/pull/10.\n'
+            '|<img alt="danuker@...\'s avatar" src="https://avatars.githubusercontent.com/u/0?s=50" width="50" height="50">| danuker@... reported|\n'
+            '|-|-|\n'
+            '|Trac ID|trac#6|\n'
+            '|Type|task|\n'
+            '|Created|2010-11-04 15:04:51Z|\n'
+            '|Branch|https://github.com/chevah/trac-migration-staging/tree/10286-pwd-checkers-types|\n'
             '\n'
-            'description',
-            request.data['body'])
+            'description\n'
+            '\n'
+            '<details><summary>Searchable metadata</summary>\n'
+            '\n'
+            '```\n'
+            'trac-id__6 6\n',
+            request.data['body'].split('type__', 1)[0])
+        self.assertNotIn('forbidden', request.data['body'])
 
 
 class TestNumberPredictor(unittest.TestCase):
@@ -728,44 +1031,6 @@ class TestNumberPredictor(unittest.TestCase):
                 [7, 8, 9, 10, 11],
                 ),
             self.sut.orderTickets(tickets, [])
-            )
-
-    def test_orderTickets_multiple_repos(self):
-        """
-        Splits tickets correctly across repositories.
-        """
-        self.sut.next_numbers['commons'] = 7
-        self.sut.next_numbers['trac-migration-staging'] = 17
-        tickets = [
-            {'t_id': 1, 'component': 'commons'},
-            {'t_id': 7, 'component': 'commons'},
-            {'t_id': 11, 'component': 'trac-migration-staging'},
-            {'t_id': 17, 'component': 'trac-migration-staging'},
-            ]
-
-        output, expected_github = self.sut.orderTickets(tickets, [])
-
-        commons_output = [t for t in output if t['component'] == 'commons']
-        migration_output = [
-            t for t in output if t['component'] == 'trac-migration-staging']
-
-        self.assertEqual(
-            [
-                {'t_id': 7, 'component': 'commons'},
-                {'t_id': 1, 'component': 'commons'},
-                ],
-            commons_output
-            )
-        self.assertEqual(
-            [
-                {'t_id': 17, 'component': 'trac-migration-staging'},
-                {'t_id': 11, 'component': 'trac-migration-staging'},
-                ],
-            migration_output
-            )
-        self.assertEqual(
-            expected_github,
-            [7, 8, 17, 18]
             )
 
 

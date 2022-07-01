@@ -4,19 +4,26 @@
 USER_MAPPING = {
     'adi': ('adiroiban', 'Adi Roiban <adi.roiban@chevah.com>'),
     'danuker': ('danuker', 'Dan Haiduc <danuthaiduc@gmail.com>'),
+    'Adi Roiban': ('adiroiban', 'Adi Roiban <adi.roiban@chevah.com>'),
+    }
+
+# GitHub User to GitHub UID mapping (for avatar purposes).
+UID_MAPPING = {
+    'adiroiban': 204609,
+    'mthuurne': 246676,
+    }
+
+# Users that are allowed by GitHub
+# to be assignees of issues in the target repositories.
+ASSIGNABLE_USERS = {
+    'adiroiban',
     }
 
 TRAC_TICKET_PREFIX = 'https://trac.chevah.com/ticket/'
+MIGRATED_WIKI_PREFIX = 'https://example.org/wiki/'
 
-# Trac ticket Component to GitHub repository mapping.
-REPOSITORY_MAPPING = {
-    'client': 'client',
-    'commons': 'commons',
-    'trac-migration-staging': 'trac-migration-staging',
-    }
-
-# GitHub repository for Trac tickets with Component not in the mapping.
-FALLBACK_REPOSITORY = 'server'
+# GitHub repository for Trac tickets.
+REPOSITORY = 'trac-migration-staging'
 
 # Owner of GitHub repositories where to create issues.
 OWNER = 'chevah'
@@ -29,3 +36,15 @@ ATTACHMENT_ROOT = 'https://site.com/trunk/'
 # https://github.com/settings/tokens
 OAUTH_USER = 'danuker'
 OAUTH_TOKEN = 'ghp_qwertyuiop'
+
+ALLOWED_EMAILS = {
+    'allowed@example.com',
+    }
+
+ALLOWED_KEYWORDS = {
+    'documentation',
+    'twistd',
+    'review',
+    'windows',
+    'tests',
+    }

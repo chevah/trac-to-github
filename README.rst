@@ -65,13 +65,22 @@ Things that are not yet auto-converted:
 
 # Ticket migration
 
-* Copy `config.py.sample` over `config.py`, and edit all the settings.
+The script to use is `ticket_migrate_golden_comet_preview.py`.
+
+* Copy `config.py.sample` to `config.py`, and edit all the settings.
   Perhaps use a fake `OAUTH_TOKEN` to avoid accidental changes.
 * Dump and convert the Postgres DB to SQLite, if you don't already have it,
   using `postgres-to-sqlite.sh`.
-* Get the latest `projects_created.tsv` to avoid duplicating projects.
+  * scp postgres-to-sqlite.sh user@your-server.com:/tmp/postgres-to-sqlite_`date -I`.sh
+  * ssh user@trac-server.com
+  * sudo su trac
+  * cd /tmp
+  * ./postgres-to-sqlite_`date -I`.sh  # Will take ~1 minute for ~10k tickets.
+  * ^D # Exit su trac
+  * ^D # Close SSH
+  * scp user@trac-server.com:/tmp/results.sqlite3 results-`date -I`.sqlite3  # About 70M for 10346 tickets
 * Create required files:
-  `touch tickets_created.tsv && touch tickets_expected_gold.tsv`
+  `touch tickets_created.tsv && touch tickets_expected_gold.tsv && touch milestones_created`
 * Modify `select_tickets` to your liking.
   Perform a dry run, generating `tickets_expected.tsv`.
 * Once the system generated the desired `tickets_expected.tsv`,
@@ -81,11 +90,16 @@ Things that are not yet auto-converted:
   There should be none, if all required tickets are
   in `tickets_expected_gold.tsv`.
 * If you are sure you want to create tickets, change `DRY_RUN` to `False`
-  in `ticket_migrate.py`.
-* Run `./ticket_migrate.py ../trac.db`, where `../trac.db` is the path
+  in `ticket_migrate_golden_comet_preview.py`.
+* Run `python -u ./ticket_migrate_golden_comet_preview.py ../trac.db | tee -a output.txt`, where `../trac.db` is the path
   to the Trac SQLite DB dump.
+* By the first non-dry run breakpoint:
+  * the milestones will have been created. Check `milestones_created.tsv`.
+  * the new `tickets_expected.tsv` must match `tickets_expected_gold.tsv`.
+  * If all is in order, continue by entering `c` at the debugger.
 
-In the event a new ticket is created while the script is running,
+In the event a new ticket or PR is created while the script is running,
 you must manually add a fake entry to `tickets_created.tsv` so that,
 on retrying, as much as possible of `tickets_expected.tsv` still matches
 `tickets_expected_gold.tsv`.
+But you must manually fix any references to that GitHub ID.
